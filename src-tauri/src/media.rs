@@ -80,37 +80,66 @@ fn checked(app: &AppHandle, path: &str) -> Result<PathBuf, String> {
         .map_err(|e| e.to_string())?;
     let file = Path::new(path).canonicalize().map_err(|e| e.to_string())?;
     if file.starts_with(&root) {
-        Ok(file)
+        // canonicalize() returns Windows' special long form "\\?\C:\...". Some Windows
+        // functions (like the Recycle Bin) reject that, so turn it back into "C:\...".
+        let text = file.to_string_lossy();
+        Ok(match text.strip_prefix(r"\\?\") {
+            Some(normal) if !normal.starts_with("UNC\\") => PathBuf::from(normal),
+            _ => file,
+        })
     } else {
         Err("Not an Orbit file".into())
     }
 }
 
-/// A small 320px-wide JPG preview. Made once with FFmpeg, then reused from the cache.
-pub fn thumbnail(app: &AppHandle, path: &str) -> Result<String, String> {
-    let file = checked(app, path)?;
-    let name = file
-        .file_name()
-        .ok_or("Bad file name")?
-        .to_string_lossy()
-        .into_owned();
+/// What the gallery card needs: the small preview image, and for videos their length.
+#[derive(Serialize)]
+pub struct Preview {
+    thumb: String,
+    /// Length in seconds (videos only).
+    duration: Option<f64>,
+}
 
+fn thumbs_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
         .app_cache_dir()
         .map_err(|e| e.to_string())?
         .join("thumbs");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// A small 320px-wide JPG preview (+ the video length). Made once with FFmpeg,
+/// then reused from the cache: "<file>.jpg" and "<file>.len" (length in seconds).
+pub fn preview(app: &AppHandle, path: &str) -> Result<Preview, String> {
+    let file = checked(app, path)?;
+    let name = file
+        .file_name()
+        .ok_or("Bad file name")?
+        .to_string_lossy()
+        .into_owned();
+    let is_image = name.to_lowercase().ends_with(".png");
+
+    let dir = thumbs_dir(app)?;
     let thumb = dir.join(format!("{name}.jpg"));
-    if thumb.exists() {
-        return Ok(thumb.to_string_lossy().into_owned());
+    let len_file = dir.join(format!("{name}.len"));
+    let cached_len = std::fs::read_to_string(&len_file)
+        .ok()
+        .and_then(|s| s.trim().parse::<f64>().ok());
+    if thumb.exists() && (is_image || cached_len.is_some()) {
+        return Ok(Preview {
+            thumb: thumb.to_string_lossy().into_owned(),
+            duration: cached_len,
+        });
     }
 
     // Write to a temp name first, so a failed attempt never leaves a broken thumbnail.
     let tmp = dir.join(format!("{name}.tmp.jpg"));
-    let is_image = name.to_lowercase().ends_with(".png");
     let mut cmd = common::ffmpeg();
-    cmd.arg("-y");
+    // "info" makes FFmpeg print the video's length ("Duration: 00:01:02.34"),
+    // so one FFmpeg run gives us both the preview and the length.
+    cmd.args(["-loglevel", "info", "-y"]);
     if !is_image {
         // Half a second in, so we don't get a black first frame.
         cmd.args(["-ss", "0.5"]);
@@ -127,7 +156,62 @@ pub fn thumbnail(app: &AppHandle, path: &str) -> Result<String, String> {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
     std::fs::rename(&tmp, &thumb).map_err(|e| e.to_string())?;
-    Ok(thumb.to_string_lossy().into_owned())
+
+    let duration = if is_image {
+        None
+    } else {
+        let d = parse_duration(&String::from_utf8_lossy(&output.stderr));
+        if let Some(d) = d {
+            let _ = std::fs::write(&len_file, d.to_string());
+        }
+        d
+    };
+    Ok(Preview {
+        thumb: thumb.to_string_lossy().into_owned(),
+        duration,
+    })
+}
+
+/// Finds "Duration: 00:01:02.34" in FFmpeg's output and returns 62.34.
+fn parse_duration(text: &str) -> Option<f64> {
+    let start = text.find("Duration: ")? + "Duration: ".len();
+    let value = text[start..].split(',').next()?.trim();
+    let mut seconds = 0.0;
+    for part in value.split(':') {
+        seconds = seconds * 60.0 + part.parse::<f64>().ok()?;
+    }
+    Some(seconds)
+}
+
+/// Move a file to the Recycle Bin (so a misclick can be undone) and drop its cached preview.
+pub fn delete(app: &AppHandle, path: &str) -> Result<(), String> {
+    use windows_sys::Win32::UI::Shell::{
+        FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT,
+        SHFILEOPSTRUCTW, SHFileOperationW,
+    };
+
+    let file = checked(app, path)?;
+    // Windows wants this path to end with two zero characters.
+    let mut from: Vec<u16> = file.as_os_str().to_string_lossy().encode_utf16().collect();
+    from.extend([0, 0]);
+    let mut op = SHFILEOPSTRUCTW {
+        wFunc: FO_DELETE,
+        pFrom: from.as_ptr(),
+        fFlags: (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI) as u16,
+        ..Default::default()
+    };
+    // SAFETY: `op` and `from` are valid for the duration of the call.
+    let result = unsafe { SHFileOperationW(&mut op) };
+    if result != 0 || op.fAnyOperationsAborted != 0 {
+        return Err(format!("Could not delete the file (error {result}). Is it open somewhere?"));
+    }
+
+    if let (Ok(dir), Some(name)) = (thumbs_dir(app), file.file_name()) {
+        let name = name.to_string_lossy();
+        let _ = std::fs::remove_file(dir.join(format!("{name}.jpg")));
+        let _ = std::fs::remove_file(dir.join(format!("{name}.len")));
+    }
+    Ok(())
 }
 
 /// Open a file in its default Windows app (Photos, Media Player, ...).

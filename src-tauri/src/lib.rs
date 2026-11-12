@@ -58,8 +58,16 @@ fn list_media(app: AppHandle) -> Result<Vec<media::MediaItem>, String> {
 
 /// `async` + `spawn_blocking`: runs FFmpeg on a worker thread so the window never freezes.
 #[tauri::command]
-async fn thumbnail(app: AppHandle, path: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || media::thumbnail(&app, &path))
+async fn preview(app: AppHandle, path: String) -> Result<media::Preview, String> {
+    tauri::async_runtime::spawn_blocking(move || media::preview(&app, &path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Moves the file to the Recycle Bin (on a worker thread; Windows can take a moment).
+#[tauri::command]
+async fn delete_media(app: AppHandle, path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || media::delete(&app, &path))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -136,7 +144,8 @@ pub fn run() {
             get_settings,
             set_settings,
             list_media,
-            thumbnail,
+            preview,
+            delete_media,
             open_media,
             open_media_folder,
             list_audio_devices,

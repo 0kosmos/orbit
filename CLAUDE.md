@@ -53,4 +53,5 @@ Later: per-game filters, screenshot resize/crop, clip trimming, audio (game + mi
 - [x] Step 8: microphone (WASAPI capture → second pipe; off by default, device picker in Settings) + output-device picker for game sound + "Test" level meter for both
   - Track layout with game + mic: 1 "Game + Mic" (amix normalize=0; most players only play track 1), 2 "Game", 3 "Mic". User chose this over mic-only-separate.
   - User's PC uses Voicemeeter: Windows default output = "Voicemeeter AUX Input", but their apps play elsewhere → loopback of the default captured only Orbit's own beeps (files peaked at exactly -30 dB). Hence the game-sound device picker.
-- [ ] Step 9: per-game filter (foreground window → exe ProductName/FileDescription via game.rs; file names "<Game>_<YYYY-MM-DD_HH-MM-SS-mmm>.ext"; old "Orbit_..." files = "Other"; gallery game dropdown)
+- [x] Step 9: per-game filter (foreground window → exe ProductName/FileDescription via game.rs; file names "<Game>_<YYYY-MM-DD_HH-MM-SS-mmm>.ext"; old "Orbit_..." files = "Other"; gallery game dropdown)
+- [ ] Step 10: gallery extras: video length badge (parsed from FFmpeg "Duration:" during thumbnail run, cached as thumbs\<file>.len), hover delete → Recycle Bin (SHFileOperationW + FOF_ALLOWUNDO), sort newest/oldest/largest/smallest

@@ -12,6 +12,9 @@
     modified: number;
     size: number;
   };
+  // Must match Preview in src-tauri/src/media.rs
+  type Preview = { thumb: string; duration: number | null };
+  type Sort = "newest" | "oldest" | "largest" | "smallest";
 
   const filters: { value: Kind | "all"; label: string }[] = [
     { value: "all", label: "All" },
@@ -20,11 +23,20 @@
     { value: "recording", label: "Recordings" },
   ];
 
+  const sorts: { value: Sort; label: string }[] = [
+    { value: "newest", label: "Newest first" },
+    { value: "oldest", label: "Oldest first" },
+    { value: "largest", label: "Largest first" },
+    { value: "smallest", label: "Smallest first" },
+  ];
+
   let items = $state<Item[]>([]);
   let filter = $state<Kind | "all">("all");
   let gameFilter = $state("all");
-  // path -> thumbnail URL ("" if it couldn't be made)
-  let thumbs = $state<Record<string, string>>({});
+  let sort = $state<Sort>("newest");
+  let error = $state("");
+  // path -> preview (thumbnail URL + video length); thumb "" if it couldn't be made
+  let previews = $state<Record<string, { src: string; duration: number | null }>>({});
 
   // Every game that has something in the gallery, A–Z ("Other" last).
   let games = $derived(
@@ -32,18 +44,29 @@
       a === "Other" ? 1 : b === "Other" ? -1 : a.localeCompare(b),
     ),
   );
+
+  const compare: Record<Sort, (a: Item, b: Item) => number> = {
+    newest: (a, b) => b.modified - a.modified,
+    oldest: (a, b) => a.modified - b.modified,
+    largest: (a, b) => b.size - a.size,
+    smallest: (a, b) => a.size - b.size,
+  };
+
   let shown = $derived(
-    items.filter(
-      (i) => (filter === "all" || i.kind === filter) && (gameFilter === "all" || i.game === gameFilter),
-    ),
+    items
+      .filter(
+        (i) =>
+          (filter === "all" || i.kind === filter) && (gameFilter === "all" || i.game === gameFilter),
+      )
+      .sort(compare[sort]),
   );
 
   async function refresh() {
     items = await invoke<Item[]>("list_media");
   }
 
-  // --- Lazy thumbnails ---
-  // A thumbnail is only requested when its card scrolls into view,
+  // --- Lazy previews ---
+  // A preview is only requested when its card scrolls into view,
   // and at most 3 are made at the same time.
   const queue: string[] = [];
   let busy = 0;
@@ -52,9 +75,9 @@
     while (busy < 3 && queue.length > 0) {
       const path = queue.shift()!;
       busy++;
-      invoke<string>("thumbnail", { path })
-        .then((file) => (thumbs[path] = convertFileSrc(file)))
-        .catch(() => (thumbs[path] = ""))
+      invoke<Preview>("preview", { path })
+        .then((p) => (previews[path] = { src: convertFileSrc(p.thumb), duration: p.duration }))
+        .catch(() => (previews[path] = { src: "", duration: null }))
         .finally(() => {
           busy--;
           pump();
@@ -67,7 +90,7 @@
       if (!entry.isIntersecting) continue;
       observer.unobserve(entry.target);
       const path = (entry.target as HTMLElement).dataset.path!;
-      if (!(path in thumbs) && !queue.includes(path)) {
+      if (!(path in previews) && !queue.includes(path)) {
         queue.push(path);
         pump();
       }
@@ -91,6 +114,18 @@
     };
   });
 
+  // Moves the file to the Recycle Bin, then removes it from the list.
+  async function remove(item: Item) {
+    try {
+      await invoke("delete_media", { path: item.path });
+      items = items.filter((i) => i.path !== item.path);
+      delete previews[item.path];
+      error = "";
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
   function formatDate(ms: number) {
     return new Date(ms).toLocaleString(undefined, {
       day: "numeric",
@@ -104,6 +139,15 @@
     return bytes < 1024 * 1024
       ? `${Math.max(1, Math.round(bytes / 1024))} KB`
       : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  // 62.3 -> "1:02", 3725 -> "1:02:05"
+  function formatDuration(seconds: number) {
+    const s = Math.round(seconds);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const ss = String(s % 60).padStart(2, "0");
+    return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
   }
 
   const kindLabel: Record<Kind, string> = {
@@ -122,37 +166,61 @@
   {#each filters as f}
     <button class:active={filter === f.value} onclick={() => (filter = f.value)}>{f.label}</button>
   {/each}
-  <select bind:value={gameFilter}>
-    <option value="all">All games</option>
-    {#each games as g}
-      <option value={g}>{g}</option>
-    {/each}
-  </select>
+  <div class="selects">
+    <select bind:value={gameFilter}>
+      <option value="all">All games</option>
+      {#each games as g}
+        <option value={g}>{g}</option>
+      {/each}
+    </select>
+    <select bind:value={sort}>
+      {#each sorts as s}
+        <option value={s.value}>{s.label}</option>
+      {/each}
+    </select>
+  </div>
 </div>
+
+{#if error}
+  <p class="error">{error}</p>
+{/if}
 
 {#if shown.length === 0}
   <p class="muted">Nothing here yet.</p>
 {:else}
   <div class="grid">
     {#each shown as item (item.path)}
-      <button
-        class="card"
-        data-path={item.path}
-        use:lazy
-        onclick={() => invoke("open_media", { path: item.path })}
-        title={item.name}
-      >
-        <div class="thumb">
-          {#if thumbs[item.path]}
-            <img src={thumbs[item.path]} alt="" decoding="async" />
-          {/if}
-          <span class="badge">{kindLabel[item.kind]}</span>
-        </div>
-        <div class="meta">
-          <span class="game">{item.game}</span>
-          <span class="muted">{formatDate(item.modified)} · {formatSize(item.size)}</span>
-        </div>
-      </button>
+      {@const preview = previews[item.path]}
+      <div class="card" data-path={item.path} use:lazy>
+        <button
+          class="open"
+          onclick={() => invoke("open_media", { path: item.path })}
+          title={item.name}
+        >
+          <div class="thumb">
+            {#if preview?.src}
+              <img src={preview.src} alt="" decoding="async" />
+            {/if}
+            <span class="badge">{kindLabel[item.kind]}</span>
+            {#if preview?.duration != null}
+              <span class="duration">{formatDuration(preview.duration)}</span>
+            {/if}
+          </div>
+          <div class="meta">
+            <span class="game">{item.game}</span>
+            <span class="muted">{formatDate(item.modified)} · {formatSize(item.size)}</span>
+          </div>
+        </button>
+        <button class="delete" title="Move to Recycle Bin" onclick={() => remove(item)}>
+          <!-- trash can icon -->
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M9 3h6l1 2h4v2H4V5h4l1-2zm-3 6h12l-1 12H7L6 9zm4 2v8h2v-8h-2zm4 0v8h-2v-8h2z"
+            />
+          </svg>
+        </button>
+      </div>
     {/each}
   </div>
 {/if}
@@ -171,6 +239,9 @@
   }
   .muted {
     color: #777;
+  }
+  .error {
+    color: #ff9a9a;
   }
   button {
     font: inherit;
@@ -208,6 +279,20 @@
     border-color: #333;
     color: #fff;
   }
+  .selects {
+    display: flex;
+    gap: 6px;
+    margin-left: auto;
+  }
+  .selects select {
+    max-width: 200px;
+    padding: 5px 8px;
+    border: 1px solid #222;
+    border-radius: 6px;
+    background: #111;
+    color: #e6e6e6;
+    font: inherit;
+  }
 
   .grid {
     display: grid;
@@ -215,21 +300,28 @@
     gap: 14px;
   }
   .card {
-    display: flex;
-    flex-direction: column;
-    padding: 0;
+    position: relative;
     border: 1px solid #1a1a1a;
     border-radius: 8px;
     background: #0a0a0a;
-    color: inherit;
-    text-align: left;
     overflow: hidden;
   }
   .card:hover {
     border-color: #333;
   }
+  .open {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    padding: 0;
+    border: none;
+    background: none;
+    color: inherit;
+    text-align: left;
+  }
   .thumb {
     position: relative;
+    width: 100%;
     aspect-ratio: 16 / 9;
     background: #111;
   }
@@ -239,15 +331,24 @@
     object-fit: cover;
     display: block;
   }
-  .badge {
+  .badge,
+  .duration {
     position: absolute;
-    left: 6px;
-    top: 6px;
     padding: 1px 6px;
     border-radius: 4px;
     background: rgba(0, 0, 0, 0.7);
     font-size: 11px;
     color: #ccc;
+  }
+  .badge {
+    left: 6px;
+    top: 6px;
+  }
+  .duration {
+    right: 6px;
+    bottom: 6px;
+    color: #fff;
+    font-variant-numeric: tabular-nums;
   }
   .meta {
     display: flex;
@@ -261,14 +362,28 @@
     white-space: nowrap;
     text-overflow: ellipsis;
   }
-  .filters select {
-    margin-left: auto;
-    max-width: 220px;
-    padding: 5px 8px;
-    border: 1px solid #222;
+
+  /* Delete button: only visible while hovering the card. */
+  .delete {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: none;
     border-radius: 6px;
-    background: #111;
-    color: #e6e6e6;
-    font: inherit;
+    background: rgba(0, 0, 0, 0.75);
+    color: #ccc;
+  }
+  .card:hover .delete {
+    display: flex;
+  }
+  .delete:hover {
+    background: #b3261e;
+    color: #fff;
   }
 </style>
