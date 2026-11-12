@@ -244,6 +244,13 @@ pub struct Crop {
     h: u32,
 }
 
+impl Crop {
+    /// FFmpeg filter that keeps only this rectangle.
+    pub fn ffmpeg_filter(&self) -> String {
+        format!("crop={}:{}:{}:{}", self.w.max(1), self.h.max(1), self.x, self.y)
+    }
+}
+
 /// Crop and/or resize a screenshot with FFmpeg.
 /// - `crop`: the part to keep (None = whole image)
 /// - `width`: final width in pixels, height follows (None = keep size)
@@ -279,7 +286,7 @@ pub fn edit_image(
 
     let mut filters = Vec::new();
     if let Some(c) = crop {
-        filters.push(format!("crop={}:{}:{}:{}", c.w.max(1), c.h.max(1), c.x, c.y));
+        filters.push(c.ffmpeg_filter());
     }
     if let Some(w) = width {
         filters.push(format!("scale={}:-1:flags=lanczos", w.max(1)));

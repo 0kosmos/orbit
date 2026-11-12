@@ -8,6 +8,7 @@ mod recorder;
 mod replay;
 mod screenshot;
 mod settings;
+mod snip;
 mod sound;
 mod stats;
 mod tray;
@@ -74,6 +75,7 @@ fn set_settings(app: AppHandle, new: settings::Settings) -> Result<(), String> {
         || new.hotkey_record != old.hotkey_record
         || new.hotkey_replay != old.hotkey_replay
         || new.hotkey_overlay != old.hotkey_overlay
+        || new.hotkey_snip != old.hotkey_snip
         || new.overlay_enabled != old.overlay_enabled;
     // Overlay switched off: close it if it's open.
     if !new.overlay_enabled {
@@ -143,6 +145,59 @@ async fn pick_folder(app: AppHandle) -> Option<String> {
     .await
     .ok()
     .flatten()
+}
+
+/// Region screenshot (snip) window.
+#[tauri::command]
+fn snip_info(app: AppHandle) -> Option<snip::SnipInfo> {
+    snip::info(&app)
+}
+
+#[tauri::command]
+async fn snip_save(
+    app: AppHandle,
+    crop: Option<media::Crop>,
+    keep: bool,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || snip::save(&app, crop, keep))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn snip_ready(app: AppHandle) {
+    snip::ready(&app);
+}
+
+#[tauri::command]
+fn overlay_ready(app: AppHandle) {
+    overlay::ready(&app);
+}
+
+#[tauri::command]
+fn overlay_open_settings(app: AppHandle) {
+    overlay::open_settings(&app);
+}
+
+/// The page the main window should show first (set by the overlay's "All settings").
+#[tauri::command]
+fn take_pending_tab(app: AppHandle) -> Option<String> {
+    app.state::<overlay::PendingTab>().0.lock().unwrap().take()
+}
+
+#[tauri::command]
+fn snip_cancel(app: AppHandle) {
+    snip::cancel(&app);
+}
+
+#[tauri::command]
+fn overlay_snip(app: AppHandle) {
+    overlay::close(&app);
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        snip::start(&app2);
+    });
 }
 
 /// Overlay buttons.
@@ -296,6 +351,7 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -311,6 +367,7 @@ pub fn run() {
                         }
                         Some(hotkeys::Action::SaveReplay) => replay::save(app.clone()),
                         Some(hotkeys::Action::Overlay) => overlay::toggle(app),
+                        Some(hotkeys::Action::Snip) => snip::start(app),
                         None => {}
                     }
                 })
@@ -321,6 +378,8 @@ pub fn run() {
         .manage(recorder::Recorder::default())
         .manage(replay::Replay::default())
         .manage(audio::LevelTest::default())
+        .manage(snip::SnipState::default())
+        .manage(overlay::PendingTab::default())
         .invoke_handler(tauri::generate_handler![
             toggle_recording,
             is_recording,
@@ -348,7 +407,15 @@ pub fn run() {
             pick_folder,
             close_overlay,
             overlay_screenshot,
-            overlay_open_main
+            overlay_open_main,
+            overlay_snip,
+            snip_info,
+            snip_save,
+            snip_cancel,
+            snip_ready,
+            overlay_ready,
+            overlay_open_settings,
+            take_pending_tab
         ])
         .setup(|app| {
             let handle = app.handle();

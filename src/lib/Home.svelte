@@ -13,6 +13,7 @@
   type S = {
     replay_seconds: number;
     hotkey_screenshot: string;
+    hotkey_snip: string;
     hotkey_record: string;
     hotkey_replay: string;
     video_fps: number;
@@ -166,6 +167,7 @@
     {#if s}
       <ul class="keys">
         <li><span>Screenshot</span><kbd>{hotkeyLabel(s.hotkey_screenshot)}</kbd></li>
+        <li><span>Region screenshot (snip)</span><kbd>{hotkeyLabel(s.hotkey_snip)}</kbd></li>
         <li><span>Start / stop recording</span><kbd>{hotkeyLabel(s.hotkey_record)}</kbd></li>
         <li><span>Save replay</span><kbd>{hotkeyLabel(s.hotkey_replay)}</kbd></li>
       </ul>

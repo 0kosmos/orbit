@@ -37,6 +37,7 @@
       }),
       listen<string>("replay-save-failed", (e) => show(`Saving clip failed: ${e.payload}`, true)),
       listen<string>("replay-failed", (e) => show(`Replay buffer stopped: ${e.payload}`, true)),
+      listen("snip-copied", () => show("Copied to clipboard")),
     ];
     return () => stops.forEach((p) => p.then((stop) => stop()));
   });

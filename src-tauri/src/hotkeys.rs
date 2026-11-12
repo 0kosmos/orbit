@@ -13,6 +13,7 @@ pub enum Action {
     Record,
     SaveReplay,
     Overlay,
+    Snip,
 }
 
 /// The hotkeys currently in use, and what each one does.
@@ -38,6 +39,7 @@ pub fn apply(app: &AppHandle, settings: &Settings) -> Result<(), String> {
         (parse(&settings.hotkey_screenshot)?, Action::Screenshot),
         (parse(&settings.hotkey_record)?, Action::Record),
         (parse(&settings.hotkey_replay)?, Action::SaveReplay),
+        (parse(&settings.hotkey_snip)?, Action::Snip),
     ];
     // The overlay hotkey only exists while the overlay is switched on.
     if settings.overlay_enabled {
@@ -73,6 +75,7 @@ pub fn load(app: &AppHandle, settings: &Settings) {
         (pick(&settings.hotkey_screenshot, &defaults.hotkey_screenshot), Action::Screenshot),
         (pick(&settings.hotkey_record, &defaults.hotkey_record), Action::Record),
         (pick(&settings.hotkey_replay, &defaults.hotkey_replay), Action::SaveReplay),
+        (pick(&settings.hotkey_snip, &defaults.hotkey_snip), Action::Snip),
     ];
     if settings.overlay_enabled {
         keys.push((pick(&settings.hotkey_overlay, &defaults.hotkey_overlay), Action::Overlay));

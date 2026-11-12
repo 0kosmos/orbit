@@ -33,8 +33,16 @@
   }
   $effect(() => {
     invoke<ShellSettings>("get_settings").then(use);
-    const stop = listen<ShellSettings>("settings-changed", (e) => use(e.payload));
-    return () => stop.then((s) => s());
+    // Opened from the overlay's "All settings": start on that page.
+    invoke<string | null>("take_pending_tab").then((t) => t && (tab = t as Tab));
+    const stops = [
+      listen<ShellSettings>("settings-changed", (e) => use(e.payload)),
+      listen<string>("open-tab", (e) => {
+        tab = e.payload as Tab;
+        invoke("take_pending_tab");
+      }),
+    ];
+    return () => stops.forEach((p) => p.then((s) => s()));
   });
 
   const tabs: { id: Tab; label: string; icon: string; fill?: boolean }[] = [

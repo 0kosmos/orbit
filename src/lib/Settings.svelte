@@ -19,6 +19,7 @@
     hotkey_record: string;
     hotkey_replay: string;
     hotkey_overlay: string;
+    hotkey_snip: string;
     overlay_enabled: boolean;
     video_fps: number;
     video_quality: string;
@@ -34,7 +35,12 @@
     status_bar: boolean;
     start_with_windows: boolean;
   };
-  type HotkeyField = "hotkey_screenshot" | "hotkey_record" | "hotkey_replay" | "hotkey_overlay";
+  type HotkeyField =
+    | "hotkey_screenshot"
+    | "hotkey_snip"
+    | "hotkey_record"
+    | "hotkey_replay"
+    | "hotkey_overlay";
   // Must match DeviceList in src-tauri/src/audio.rs
   type DeviceList = { default_name: string | null; devices: { id: string; name: string }[] };
   type Kind = "game" | "mic";
@@ -224,6 +230,7 @@
   // --- Hotkeys: click one, then press the new key combination ---
   const hotkeyRows: { field: HotkeyField; label: string }[] = [
     { field: "hotkey_screenshot", label: "Take screenshot" },
+    { field: "hotkey_snip", label: "Region screenshot (snip)" },
     { field: "hotkey_record", label: "Start / stop recording" },
     { field: "hotkey_replay", label: "Save replay (last X minutes)" },
     { field: "hotkey_overlay", label: "Open / close the in-game overlay" },
@@ -277,6 +284,7 @@
     settings.hotkey_record = "Alt+F9";
     settings.hotkey_replay = "Alt+F10";
     settings.hotkey_overlay = "Alt+F8";
+    settings.hotkey_snip = "Alt+F11";
     hotkeyError = "";
     invoke("set_settings", { new: settings }).catch((err) => (hotkeyError = String(err)));
   }

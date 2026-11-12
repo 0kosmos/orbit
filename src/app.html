@@ -11,7 +11,9 @@
       html.overlay-window, html.overlay-window body { background: transparent !important; }
     </style>
     <script>
-      if (location.pathname.startsWith("/overlay")) document.documentElement.classList.add("overlay-window");
+      // Overlay and snip windows are see-through from the very first frame.
+      if (location.pathname.startsWith("/overlay") || location.pathname.startsWith("/snip"))
+        document.documentElement.classList.add("overlay-window");
     </script>
     %sveltekit.head%
   </head>

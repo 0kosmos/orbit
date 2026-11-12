@@ -56,6 +56,8 @@ pub struct Settings {
     /// In-game overlay (off by default) and its hotkey.
     pub overlay_enabled: bool,
     pub hotkey_overlay: String,
+    /// Region screenshot (snip): freeze the screen, drag the part to keep.
+    pub hotkey_snip: String,
 }
 
 impl Default for Settings {
@@ -86,6 +88,7 @@ impl Default for Settings {
             hotkey_replay: "Alt+F10".into(),
             overlay_enabled: false,
             hotkey_overlay: "Alt+F8".into(),
+            hotkey_snip: "Alt+F11".into(),
         }
     }
 }
