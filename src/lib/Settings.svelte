@@ -26,6 +26,8 @@
     theme: string;
     animations: boolean;
     blur: boolean;
+    close_to_tray: boolean;
+    start_with_windows: boolean;
   };
   type HotkeyField = "hotkey_screenshot" | "hotkey_record" | "hotkey_replay";
   // Must match DeviceList in src-tauri/src/audio.rs
@@ -97,6 +99,17 @@
   function saveLook() {
     if (settings) applyUi(settings);
     save();
+  }
+
+  // "Start with Windows" can fail (e.g. blocked by Windows): then flip the switch back.
+  async function saveStartup() {
+    try {
+      await invoke("set_settings", { new: settings });
+      error = "";
+    } catch (e) {
+      settings!.start_with_windows = !settings!.start_with_windows;
+      error = String(e);
+    }
   }
 
   async function save() {
@@ -426,6 +439,30 @@
         <span class="desc">A short beep when saving, starting a recording, or on errors.</span>
       </div>
       <input type="checkbox" class="switch" bind:checked={settings.sounds} onchange={save} />
+    </label>
+  </section>
+
+  <!-- System -->
+  <section class="card">
+    <h2>System</h2>
+
+    <label class="row">
+      <div class="label">
+        <span>Keep running in the tray when closed</span>
+        <span class="desc">
+          Closing the window frees its memory; hotkeys, recording and the replay buffer keep
+          working. Open Orbit again from the icon next to the clock.
+        </span>
+      </div>
+      <input type="checkbox" class="switch" bind:checked={settings.close_to_tray} onchange={save} />
+    </label>
+
+    <label class="row">
+      <div class="label">
+        <span>Start with Windows</span>
+        <span class="desc">Starts quietly in the tray, without opening the window.</span>
+      </div>
+      <input type="checkbox" class="switch" bind:checked={settings.start_with_windows} onchange={saveStartup} />
     </label>
   </section>
 

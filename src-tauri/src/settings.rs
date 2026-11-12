@@ -40,6 +40,10 @@ pub struct Settings {
     pub animations: bool,
     /// Blur / see-through effects behind the viewer, notifications and filter bar.
     pub blur: bool,
+    /// Closing the window keeps Orbit running in the system tray (hotkeys keep working).
+    pub close_to_tray: bool,
+    /// Start Orbit (in the tray, no window) when Windows starts.
+    pub start_with_windows: bool,
     /// Hotkeys, like "Alt+F12" or "Ctrl+Shift+KeyS".
     pub hotkey_screenshot: String,
     pub hotkey_record: String,
@@ -65,6 +69,8 @@ impl Default for Settings {
             theme: "black".into(),
             animations: true,
             blur: true,
+            close_to_tray: true,
+            start_with_windows: false,
             hotkey_screenshot: "Alt+F12".into(),
             hotkey_record: "Alt+F9".into(),
             hotkey_replay: "Alt+F10".into(),

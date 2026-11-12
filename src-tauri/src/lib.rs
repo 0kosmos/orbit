@@ -8,6 +8,7 @@ mod replay;
 mod screenshot;
 mod settings;
 mod sound;
+mod tray;
 
 use tauri::window::Color;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, Theme};
@@ -59,6 +60,9 @@ fn set_settings(app: AppHandle, new: settings::Settings) -> Result<(), String> {
         hotkeys::apply(&app, &new)?;
     }
     let theme_changed = new.theme != old.theme;
+    if new.start_with_windows != old.start_with_windows {
+        tray::set_autostart(&app, new.start_with_windows)?;
+    }
     settings::set(&app, new)?;
     if theme_changed {
         apply_window_theme(&app);
@@ -72,7 +76,7 @@ fn set_settings(app: AppHandle, new: settings::Settings) -> Result<(), String> {
 }
 
 /// Light or dark Windows title bar (and window background), to match the theme.
-fn apply_window_theme(app: &AppHandle) {
+pub(crate) fn apply_window_theme(app: &AppHandle) {
     let light = settings::get(app).theme == "light";
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_theme(Some(if light { Theme::Light } else { Theme::Dark }));
@@ -205,6 +209,15 @@ fn open_media_folder(app: AppHandle) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Must be first: starting Orbit again just opens the running one's window.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tray::show_main_window(app);
+        }))
+        // "Start with Windows" starts Orbit with --minimized (tray only, no window).
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--minimized"]),
+        ))
         .plugin(tauri_plugin_opener::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -256,7 +269,11 @@ pub fn run() {
             let handle = app.handle();
             settings::load(handle);
             hotkeys::load(handle, &settings::get(handle));
-            apply_window_theme(handle);
+            tray::create(handle)?;
+            // Started by Windows at login: stay in the tray. Otherwise open the window.
+            if !tray::started_minimized() {
+                tray::show_main_window(handle);
+            }
 
             if settings::get(handle).replay_autostart {
                 let handle = handle.clone();
@@ -266,11 +283,17 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
-            // Closing Orbit: finish files instead of leaving FFmpeg running.
-            if let RunEvent::Exit = event {
+        .run(|app, event| match event {
+            // The window was closed (no exit code): keep running in the tray if wanted.
+            // "Quit Orbit" in the tray menu gives an exit code, so that really quits.
+            RunEvent::ExitRequested { code: None, api, .. } if tray::keep_running(app) => {
+                api.prevent_exit();
+            }
+            // Quitting: finish files instead of leaving FFmpeg running.
+            RunEvent::Exit => {
                 recorder::stop(app);
                 replay::stop(app);
             }
+            _ => {}
         });
 }
