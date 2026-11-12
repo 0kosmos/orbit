@@ -6,11 +6,14 @@
     src,
     volume = $bindable(1),
     speed = $bindable(1),
+    trim = $bindable(null),
     onerror,
   }: {
     src: string;
     volume?: number;
     speed?: number;
+    // Trim mode: the part to keep (seconds). null = normal player.
+    trim?: { start: number; end: number } | null;
     onerror?: () => void;
   } = $props();
 
@@ -28,39 +31,70 @@
     let frame = 0;
     const tick = () => {
       time = video.currentTime;
+      // Trimming: play only the kept part, on repeat.
+      if (trim && (time >= trim.end || time < trim.start - 0.05)) {
+        video.currentTime = trim.start;
+        time = trim.start;
+      }
       frame = requestAnimationFrame(tick);
     };
     tick();
     return () => cancelAnimationFrame(frame);
   });
 
+  // Trim mode starts with the whole video selected.
+  $effect(() => {
+    if (trim && duration > 0 && trim.end > duration) trim.end = duration;
+  });
+
   function togglePlay() {
-    if (video.ended) video.currentTime = 0;
+    if (video.ended) video.currentTime = trim?.start ?? 0;
     if (video.paused) video.play();
     else video.pause();
   }
 
   function skip(seconds: number) {
-    video.currentTime = Math.min(Math.max(0, video.currentTime + seconds), duration || 0);
+    const lo = trim?.start ?? 0;
+    const hi = trim?.end ?? (duration || 0);
+    video.currentTime = Math.min(Math.max(lo, video.currentTime + seconds), hi);
     time = video.currentTime;
   }
 
-  // --- Timeline: click or drag to jump ---
+  // --- Timeline: click or drag to jump (or, when trimming, drag the start/end handles) ---
   let dragging = $state(false);
-  function seekTo(e: PointerEvent, bar: HTMLElement) {
+  let handle: "start" | "end" | null = null;
+  const MIN_TRIM = 0.5; // seconds
+
+  function timeAt(e: PointerEvent, bar: HTMLElement) {
     const rect = bar.getBoundingClientRect();
-    const ratio = Math.min(Math.max(0, (e.clientX - rect.left) / rect.width), 1);
-    video.currentTime = ratio * duration;
-    time = video.currentTime;
+    return Math.min(Math.max(0, (e.clientX - rect.left) / rect.width), 1) * duration;
+  }
+  function seekTo(e: PointerEvent, bar: HTMLElement) {
+    let t = timeAt(e, bar);
+    if (handle && trim) {
+      // Move a trim handle and show that exact frame.
+      if (handle === "start") trim.start = t = Math.min(t, trim.end - MIN_TRIM);
+      else trim.end = t = Math.max(t, trim.start + MIN_TRIM);
+    } else if (trim) {
+      t = Math.min(Math.max(t, trim.start), trim.end);
+    }
+    video.currentTime = t;
+    time = t;
   }
   function onPointerDown(e: PointerEvent) {
     const bar = e.currentTarget as HTMLElement;
     bar.setPointerCapture(e.pointerId);
     dragging = true;
+    handle = ((e.target as HTMLElement).dataset.handle as "start" | "end") ?? null;
+    if (handle) video.pause();
     seekTo(e, bar);
   }
   function onPointerMove(e: PointerEvent) {
     if (dragging) seekTo(e, e.currentTarget as HTMLElement);
+  }
+  function onPointerUp() {
+    dragging = false;
+    handle = null;
   }
 
   function fullscreen() {
@@ -114,6 +148,7 @@
     <div
       class="timeline"
       class:dragging
+      class:trimming={trim !== null}
       role="slider"
       tabindex="-1"
       aria-label="Position"
@@ -122,11 +157,24 @@
       aria-valuenow={Math.round(time)}
       onpointerdown={onPointerDown}
       onpointermove={onPointerMove}
-      onpointerup={() => (dragging = false)}
+      onpointerup={onPointerUp}
+      onpointercancel={onPointerUp}
     >
       <div class="track">
         <div class="fill" style:width="{progress}%"></div>
       </div>
+      {#if trim && duration > 0}
+        <!-- Greyed-out parts that get cut, and the two handles. -->
+        <div class="cut" style:left="0" style:width="{(trim.start / duration) * 100}%"></div>
+        <div class="cut" style:left="{(trim.end / duration) * 100}%" style:right="0"></div>
+        <div
+          class="keep"
+          style:left="{(trim.start / duration) * 100}%"
+          style:width="{((trim.end - trim.start) / duration) * 100}%"
+        ></div>
+        <div class="trim-handle" data-handle="start" style:left="{(trim.start / duration) * 100}%"></div>
+        <div class="trim-handle" data-handle="end" style:left="{(trim.end / duration) * 100}%"></div>
+      {/if}
       <div class="knob" style:left="{progress}%"></div>
     </div>
 
@@ -281,6 +329,56 @@
   .timeline:hover .knob,
   .timeline.dragging .knob {
     opacity: 1;
+  }
+
+  /* --- Trim mode --- */
+  .timeline.trimming {
+    height: 30px;
+    margin-bottom: 2px;
+  }
+  .timeline.trimming .track {
+    height: 6px;
+    margin-top: -3px;
+  }
+  .cut {
+    position: absolute;
+    top: 50%;
+    height: 6px;
+    margin-top: -3px;
+    background: rgba(0, 0, 0, 0.7);
+    pointer-events: none;
+  }
+  .keep {
+    position: absolute;
+    top: 50%;
+    height: 20px;
+    margin-top: -10px;
+    border-top: 2px solid #fff;
+    border-bottom: 2px solid #fff;
+    pointer-events: none;
+  }
+  .trim-handle {
+    position: absolute;
+    top: 50%;
+    width: 10px;
+    height: 26px;
+    margin: -13px 0 0 -5px;
+    border-radius: 4px;
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+    cursor: ew-resize;
+    z-index: 1;
+  }
+  .trim-handle::after {
+    content: "";
+    position: absolute;
+    left: 4px;
+    top: 8px;
+    width: 2px;
+    height: 10px;
+    border-radius: 1px;
+    background: #000;
+    opacity: 0.4;
   }
 
   .bar {

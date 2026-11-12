@@ -33,6 +33,37 @@
   // Screenshot editor (crop / resize) open?
   let editing = $state(false);
 
+  // Video trimming: the part to keep (seconds), or null when not trimming.
+  let trim = $state<{ start: number; end: number } | null>(null);
+  let trimBusy = $state(false);
+  let trimError = $state("");
+
+  async function saveTrim(replace: boolean) {
+    if (!trim) return;
+    trimBusy = true;
+    trimError = "";
+    try {
+      const saved = await invoke<string>("trim_video", {
+        path: item.path,
+        start: trim.start,
+        end: trim.end,
+        replace,
+      });
+      trim = null;
+      onedited(saved);
+    } catch (e) {
+      trimError = String(e);
+    }
+    trimBusy = false;
+  }
+
+  function clock(s: number) {
+    const t = Math.max(0, s);
+    const m = Math.floor(t / 60);
+    const sec = (t % 60).toFixed(1).padStart(4, "0");
+    return `${m}:${sec}`;
+  }
+
   let item = $derived(items[index]);
   let isVideo = $derived(item?.kind !== "screenshot");
   // "?v=" + time changed: a replaced (edited) image is never shown from the old cache.
@@ -44,6 +75,8 @@
     void src;
     failed = false;
     editing = false;
+    trim = null;
+    trimError = "";
   });
 
   // Remember the volume between videos (only in this browser view; ok if unavailable).
@@ -72,6 +105,12 @@
 
   function onKeydown(e: KeyboardEvent) {
     if (editing) return; // the editor handles its own keys (Esc = cancel editing)
+    if (e.key === "Escape" && trim) {
+      trim = null;
+      e.preventDefault();
+      return;
+    }
+    if (trim) return; // while trimming, the arrow keys don't switch files
     if (e.key === "Escape") onclose();
     else if (e.key === "ArrowLeft") prev();
     else if (e.key === "ArrowRight") next();
@@ -115,6 +154,16 @@
           <span class="muted">{formatDate(item.modified)} · {index + 1} / {items.length}</span>
         </div>
         <div class="actions">
+          {#if isVideo && !trim && !failed}
+            <button class="btn" onclick={() => (trim = { start: 0, end: Infinity })}>
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                <circle cx="6" cy="6" r="3" fill="none" stroke="currentColor" stroke-width="2" />
+                <circle cx="6" cy="18" r="3" fill="none" stroke="currentColor" stroke-width="2" />
+                <path d="M8.5 7.5L20 18M8.5 16.5L20 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+              Trim
+            </button>
+          {/if}
           {#if !isVideo && !editing}
             <button class="btn" onclick={() => (editing = true)}>
               <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
@@ -149,8 +198,29 @@
         {:else if isVideo}
           <!-- {#key} makes a fresh player for each file, so the old one is fully freed. -->
           {#key src}
-            <div class="media" in:fade={{ duration: ms(160) }}>
-              <Player {src} bind:volume bind:speed onerror={() => (failed = true)} />
+            <div class="media" class:trimming={trim !== null} in:fade={{ duration: ms(160) }}>
+              {#if !trimBusy}
+                <Player {src} bind:volume bind:speed bind:trim onerror={() => (failed = true)} />
+              {:else}
+                <div class="saving">Saving…</div>
+              {/if}
+              {#if trim}
+                <div class="trimbar">
+                  <div class="times">
+                    <span>Start <strong>{clock(trim.start)}</strong></span>
+                    <span>End <strong>{isFinite(trim.end) ? clock(trim.end) : "…"}</strong></span>
+                    <span>Length <strong>{isFinite(trim.end) ? clock(trim.end - trim.start) : "…"}</strong></span>
+                    {#if trimError}<span class="error">{trimError}</span>{/if}
+                  </div>
+                  <div class="trim-buttons">
+                    <button class="btn ghost" disabled={trimBusy} onclick={() => (trim = null)}>Cancel</button>
+                    <button class="btn" disabled={trimBusy} onclick={() => saveTrim(true)}>Replace original</button>
+                    <button class="btn primary" disabled={trimBusy} onclick={() => saveTrim(false)}>
+                      {trimBusy ? "Saving…" : "Save as copy"}
+                    </button>
+                  </div>
+                </div>
+              {/if}
             </div>
           {/key}
         {:else if editing}
@@ -169,14 +239,14 @@
           {/key}
         {/if}
 
-        {#if index > 0 && !editing}
+        {#if index > 0 && !editing && !trim}
           <button class="nav left" title="Previous (←)" aria-label="Previous" onclick={prev}>
             <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
               <path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
             </svg>
           </button>
         {/if}
-        {#if index < items.length - 1 && !editing}
+        {#if index < items.length - 1 && !editing && !trim}
           <button class="nav right" title="Next (→)" aria-label="Next" onclick={next}>
             <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
               <path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
@@ -274,6 +344,61 @@
     border-radius: var(--radius);
     background: #000;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  }
+  /* Trimming: a bit smaller, so the trim bar fits below the player. */
+  .media.trimming {
+    width: min(1100px, 100cqw, calc((100cqh - 170px) * 16 / 9));
+    box-shadow: none;
+  }
+  .trimbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 10px;
+    padding: 10px 14px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+  }
+  .times {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    font-size: 12px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .times strong {
+    color: var(--text);
+    font-weight: 600;
+  }
+  .trim-buttons {
+    display: flex;
+    gap: 6px;
+  }
+  .primary {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--accent-contrast);
+  }
+  .primary:hover {
+    background: var(--accent);
+    opacity: 0.9;
+  }
+  .btn:disabled {
+    opacity: 0.4;
+    pointer-events: none;
+  }
+  .saving {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    aspect-ratio: 16 / 9;
+    border-radius: var(--radius);
+    background: #000;
+    color: rgba(255, 255, 255, 0.7);
   }
   .fallback {
     text-align: center;

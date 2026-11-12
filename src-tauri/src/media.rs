@@ -308,6 +308,73 @@ pub fn edit_image(
     Ok(out.to_string_lossy().into_owned())
 }
 
+/// Keep only `start`..`end` (seconds) of a clip or recording.
+/// Copies the video and sound without re-encoding: instant, no quality loss, no GPU
+/// work. The cut snaps to the nearest keyframe (Orbit records one every second).
+/// Returns the path of the saved video.
+pub fn trim_video(
+    app: &AppHandle,
+    path: &str,
+    start: f64,
+    end: f64,
+    replace: bool,
+) -> Result<String, String> {
+    let file = checked(app, path)?;
+    if !(end > start && start >= 0.0) {
+        return Err("The end must be after the start.".into());
+    }
+    let dir = file.parent().ok_or("Bad path")?.to_path_buf();
+
+    let game = game_from_name(&file);
+    let game = if game == "Other" { "Desktop".to_string() } else { game };
+    let out = if replace {
+        file.with_extension("mp4")
+    } else {
+        dir.join(format!(
+            "{game}_{}.mp4",
+            chrono::Local::now().format("%Y-%m-%d_%H-%M-%S-%3f")
+        ))
+    };
+    let tmp = dir.join("orbit-trim-tmp.mp4");
+
+    // -ss before -i: jump straight to the keyframe at/before `start` (fast).
+    // -map 0 keeps every track (video, Game + Mic, Game, Mic) with their names.
+    let output = common::ffmpeg()
+        .args(["-y", "-ss"])
+        .arg(format!("{start:.3}"))
+        .arg("-i")
+        .arg(&file)
+        .arg("-t")
+        .arg(format!("{:.3}", end - start))
+        .args([
+            "-map",
+            "0",
+            "-c",
+            "copy",
+            "-avoid_negative_ts",
+            "make_zero",
+            "-movflags",
+            "+faststart",
+        ])
+        .arg(&tmp)
+        .output()
+        .map_err(|e| format!("Could not start FFmpeg: {e}"))?;
+    if !output.status.success() {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    if replace {
+        forget_preview(app, &file);
+        if let Err(e) = std::fs::remove_file(&file) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(format!("Could not replace the original ({e}). Is it open somewhere?"));
+        }
+    }
+    std::fs::rename(&tmp, &out).map_err(|e| e.to_string())?;
+    Ok(out.to_string_lossy().into_owned())
+}
+
 /// Remove a file's cached thumbnail and length.
 fn forget_preview(app: &AppHandle, file: &Path) {
     if let (Ok(dir), Some(name)) = (thumbs_dir(app), file.file_name()) {

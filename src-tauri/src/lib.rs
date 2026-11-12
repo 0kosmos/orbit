@@ -172,6 +172,26 @@ async fn edit_image(
     Ok(saved)
 }
 
+/// Trim a clip / recording (on a worker thread). The gallery and notification hear
+/// about it through the "replay-saved" event (shown as "Clip saved").
+#[tauri::command]
+async fn trim_video(
+    app: AppHandle,
+    path: String,
+    start: f64,
+    end: f64,
+    replace: bool,
+) -> Result<String, String> {
+    let saved = tauri::async_runtime::spawn_blocking({
+        let app = app.clone();
+        move || media::trim_video(&app, &path, start, end, replace)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let _ = app.emit("replay-saved", saved.clone());
+    Ok(saved)
+}
+
 #[tauri::command]
 fn show_in_folder(app: AppHandle, path: String) -> Result<(), String> {
     media::show_in_folder(&app, &path)
@@ -223,6 +243,7 @@ pub fn run() {
             delete_media,
             delete_media_many,
             edit_image,
+            trim_video,
             open_media,
             open_media_folder,
             show_in_folder,
