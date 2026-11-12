@@ -3,6 +3,7 @@ mod common;
 mod game;
 mod hotkeys;
 mod media;
+mod overlay;
 mod recorder;
 mod replay;
 mod screenshot;
@@ -71,7 +72,13 @@ fn set_settings(app: AppHandle, new: settings::Settings) -> Result<(), String> {
     let capture_changed = new.capture_differs(&old);
     let hotkeys_changed = new.hotkey_screenshot != old.hotkey_screenshot
         || new.hotkey_record != old.hotkey_record
-        || new.hotkey_replay != old.hotkey_replay;
+        || new.hotkey_replay != old.hotkey_replay
+        || new.hotkey_overlay != old.hotkey_overlay
+        || new.overlay_enabled != old.overlay_enabled;
+    // Overlay switched off: close it if it's open.
+    if !new.overlay_enabled {
+        overlay::close(&app);
+    }
 
     // Try new hotkeys first: if one can't be used, nothing is saved.
     if hotkeys_changed {
@@ -136,6 +143,22 @@ async fn pick_folder(app: AppHandle) -> Option<String> {
     .await
     .ok()
     .flatten()
+}
+
+/// Overlay buttons.
+#[tauri::command]
+fn close_overlay(app: AppHandle) {
+    overlay::close(&app);
+}
+
+#[tauri::command]
+fn overlay_screenshot(app: AppHandle) {
+    overlay::screenshot_without_overlay(&app);
+}
+
+#[tauri::command]
+fn overlay_open_main(app: AppHandle) {
+    overlay::open_main(&app);
 }
 
 /// Hotkeys are off while choosing a new one in Settings.
@@ -287,6 +310,7 @@ pub fn run() {
                             std::thread::spawn(move || recorder::toggle(&app));
                         }
                         Some(hotkeys::Action::SaveReplay) => replay::save(app.clone()),
+                        Some(hotkeys::Action::Overlay) => overlay::toggle(app),
                         None => {}
                     }
                 })
@@ -321,7 +345,10 @@ pub fn run() {
             stop_audio_test,
             pause_hotkeys,
             save_folders,
-            pick_folder
+            pick_folder,
+            close_overlay,
+            overlay_screenshot,
+            overlay_open_main
         ])
         .setup(|app| {
             let handle = app.handle();

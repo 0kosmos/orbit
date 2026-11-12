@@ -53,6 +53,9 @@ pub struct Settings {
     pub hotkey_screenshot: String,
     pub hotkey_record: String,
     pub hotkey_replay: String,
+    /// In-game overlay (off by default) and its hotkey.
+    pub overlay_enabled: bool,
+    pub hotkey_overlay: String,
 }
 
 impl Default for Settings {
@@ -81,6 +84,8 @@ impl Default for Settings {
             hotkey_screenshot: "Alt+F12".into(),
             hotkey_record: "Alt+F9".into(),
             hotkey_replay: "Alt+F10".into(),
+            overlay_enabled: false,
+            hotkey_overlay: "Alt+F8".into(),
         }
     }
 }

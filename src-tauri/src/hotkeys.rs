@@ -12,6 +12,7 @@ pub enum Action {
     Screenshot,
     Record,
     SaveReplay,
+    Overlay,
 }
 
 /// The hotkeys currently in use, and what each one does.
@@ -33,11 +34,15 @@ fn parse(text: &str) -> Result<Shortcut, String> {
 /// Switch to the hotkeys in `settings`. If one can't be used (invalid, a duplicate,
 /// or taken by another app), nothing changes and the error says why.
 pub fn apply(app: &AppHandle, settings: &Settings) -> Result<(), String> {
-    let wanted = vec![
+    let mut wanted = vec![
         (parse(&settings.hotkey_screenshot)?, Action::Screenshot),
         (parse(&settings.hotkey_record)?, Action::Record),
         (parse(&settings.hotkey_replay)?, Action::SaveReplay),
     ];
+    // The overlay hotkey only exists while the overlay is switched on.
+    if settings.overlay_enabled {
+        wanted.push((parse(&settings.hotkey_overlay)?, Action::Overlay));
+    }
     for (i, (a, _)) in wanted.iter().enumerate() {
         if wanted[..i].iter().any(|(b, _)| a == b) {
             return Err("Two actions can't use the same hotkey.".into());
@@ -64,11 +69,14 @@ pub fn apply(app: &AppHandle, settings: &Settings) -> Result<(), String> {
 pub fn load(app: &AppHandle, settings: &Settings) {
     let defaults = Settings::default();
     let pick = |saved: &str, default: &str| parse(saved).or_else(|_| parse(default)).ok();
-    let keys = [
+    let mut keys = vec![
         (pick(&settings.hotkey_screenshot, &defaults.hotkey_screenshot), Action::Screenshot),
         (pick(&settings.hotkey_record, &defaults.hotkey_record), Action::Record),
         (pick(&settings.hotkey_replay, &defaults.hotkey_replay), Action::SaveReplay),
     ];
+    if settings.overlay_enabled {
+        keys.push((pick(&settings.hotkey_overlay, &defaults.hotkey_overlay), Action::Overlay));
+    }
     *app.state::<Hotkeys>().0.lock().unwrap() = keys
         .into_iter()
         .filter_map(|(key, action)| Some((key?, action)))

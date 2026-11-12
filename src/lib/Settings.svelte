@@ -18,6 +18,8 @@
     hotkey_screenshot: string;
     hotkey_record: string;
     hotkey_replay: string;
+    hotkey_overlay: string;
+    overlay_enabled: boolean;
     video_fps: number;
     video_quality: string;
     encoder_preset: string;
@@ -32,7 +34,7 @@
     status_bar: boolean;
     start_with_windows: boolean;
   };
-  type HotkeyField = "hotkey_screenshot" | "hotkey_record" | "hotkey_replay";
+  type HotkeyField = "hotkey_screenshot" | "hotkey_record" | "hotkey_replay" | "hotkey_overlay";
   // Must match DeviceList in src-tauri/src/audio.rs
   type DeviceList = { default_name: string | null; devices: { id: string; name: string }[] };
   type Kind = "game" | "mic";
@@ -145,6 +147,17 @@
     if (dir) setFolder(dir);
   }
 
+  // Turning the overlay on registers its hotkey, which can fail (key taken): flip back.
+  async function saveOverlay() {
+    try {
+      await invoke("set_settings", { new: settings });
+      error = "";
+    } catch (e) {
+      settings!.overlay_enabled = !settings!.overlay_enabled;
+      error = String(e);
+    }
+  }
+
   // "Start with Windows" can fail (e.g. blocked by Windows): then flip the switch back.
   async function saveStartup() {
     try {
@@ -213,6 +226,7 @@
     { field: "hotkey_screenshot", label: "Take screenshot" },
     { field: "hotkey_record", label: "Start / stop recording" },
     { field: "hotkey_replay", label: "Save replay (last X minutes)" },
+    { field: "hotkey_overlay", label: "Open / close the in-game overlay" },
   ];
   let capturing = $state<HotkeyField | null>(null);
   let hotkeyError = $state("");
@@ -262,6 +276,7 @@
     settings.hotkey_screenshot = "Alt+F12";
     settings.hotkey_record = "Alt+F9";
     settings.hotkey_replay = "Alt+F10";
+    settings.hotkey_overlay = "Alt+F8";
     hotkeyError = "";
     invoke("set_settings", { new: settings }).catch((err) => (hotkeyError = String(err)));
   }
@@ -365,6 +380,23 @@
             <input type="checkbox" class="switch" bind:checked={settings.status_bar} onchange={save} />
           </label>
         </section>
+        <!-- In-game overlay -->
+        <section class="card">
+          <h2>In-game overlay</h2>
+
+          <label class="row">
+            <div class="label">
+              <span>Enable the overlay</span>
+              <span class="desc">
+                Press {hotkeyLabel(settings.hotkey_overlay)} in a game for quick buttons (screenshot,
+                record, replay) and PC usage. Opens only when you press it and is fully closed
+                afterwards, so it costs nothing while hidden. Works over borderless / windowed games.
+              </span>
+            </div>
+            <input type="checkbox" class="switch" bind:checked={settings.overlay_enabled} onchange={saveOverlay} />
+          </label>
+        </section>
+
         <!-- Feedback -->
         <section class="card">
           <h2>Feedback</h2>

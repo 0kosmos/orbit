@@ -5,7 +5,14 @@
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Orbit</title>
-    <style>html, body { background: #000; }</style>
+    <style>
+      html, body { background: #000; }
+      /* The in-game overlay window is see-through from the very first frame. */
+      html.overlay-window, html.overlay-window body { background: transparent !important; }
+    </style>
+    <script>
+      if (location.pathname.startsWith("/overlay")) document.documentElement.classList.add("overlay-window");
+    </script>
     %sveltekit.head%
   </head>
   <body>
