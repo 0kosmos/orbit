@@ -27,6 +27,7 @@
     animations: boolean;
     blur: boolean;
     close_to_tray: boolean;
+    save_dir: string | null;
     start_with_windows: boolean;
   };
   type HotkeyField = "hotkey_screenshot" | "hotkey_record" | "hotkey_replay";
@@ -99,6 +100,36 @@
   function saveLook() {
     if (settings) applyUi(settings);
     save();
+  }
+
+  // --- Save folder ---
+  let folder = $state("");
+  let defaultFolder = $state("");
+  function loadFolders() {
+    invoke<[string, string]>("save_folders").then(([current, def]) => {
+      folder = current;
+      defaultFolder = def;
+    });
+  }
+  loadFolders();
+
+  async function setFolder(dir: string | null) {
+    if (!settings) return;
+    const old = settings.save_dir;
+    settings.save_dir = dir;
+    try {
+      await invoke("set_settings", { new: settings });
+      error = "";
+    } catch (e) {
+      settings.save_dir = old;
+      error = String(e);
+    }
+    loadFolders();
+  }
+
+  async function chooseFolder() {
+    const dir = await invoke<string | null>("pick_folder");
+    if (dir) setFolder(dir);
   }
 
   // "Start with Windows" can fail (e.g. blocked by Windows): then flip the switch back.
@@ -442,6 +473,31 @@
     </label>
   </section>
 
+  <!-- Storage -->
+  <section class="card">
+    <h2>Storage</h2>
+
+    <div class="row">
+      <div class="label">
+        <span>Save folder</span>
+        <span class="desc path" title={folder}>{folder}</span>
+      </div>
+      <div class="folder-buttons">
+        <button class="btn" onclick={chooseFolder}>Change…</button>
+        <button class="btn ghost" onclick={() => invoke("open_media_folder")}>Open</button>
+      </div>
+    </div>
+    {#if settings.save_dir}
+      <button class="btn ghost small" onclick={() => setFolder(null)}>
+        Reset to default ({defaultFolder})
+      </button>
+    {/if}
+    <p class="desc folder-note">
+      Screenshots, Clips and Recordings folders are made inside it. Files already saved stay
+      where they are (move them yourself in Explorer if you want them in the new folder).
+    </p>
+  </section>
+
   <!-- System -->
   <section class="card">
     <h2>System</h2>
@@ -590,6 +646,19 @@
     background: var(--accent-soft);
   }
 
+  .path {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    user-select: text;
+  }
+  .folder-buttons {
+    display: flex;
+    gap: 6px;
+  }
+  .folder-note {
+    padding-bottom: 10px;
+  }
   .footnote {
     max-width: 640px;
     font-size: 12px;

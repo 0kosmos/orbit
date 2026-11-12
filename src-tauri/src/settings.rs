@@ -40,6 +40,8 @@ pub struct Settings {
     pub animations: bool,
     /// Blur / see-through effects behind the viewer, notifications and filter bar.
     pub blur: bool,
+    /// Folder for screenshots / clips / recordings. None = Videos\Orbit.
+    pub save_dir: Option<String>,
     /// Closing the window keeps Orbit running in the system tray (hotkeys keep working).
     pub close_to_tray: bool,
     /// Start Orbit (in the tray, no window) when Windows starts.
@@ -69,6 +71,7 @@ impl Default for Settings {
             theme: "black".into(),
             animations: true,
             blur: true,
+            save_dir: None,
             close_to_tray: true,
             start_with_windows: false,
             hotkey_screenshot: "Alt+F12".into(),

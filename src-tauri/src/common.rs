@@ -20,14 +20,40 @@ pub fn ffmpeg() -> Command {
 
 /// Videos\Orbit\<sub>, created if it doesn't exist yet.
 pub fn orbit_dir(app: &AppHandle, sub: &str) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .video_dir()
-        .map_err(|e| e.to_string())?
-        .join("Orbit")
-        .join(sub);
+    let dir = save_root(app)?.join(sub);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
+}
+
+/// Where everything is saved: the folder chosen in Settings, or Videos\Orbit.
+pub fn save_root(app: &AppHandle) -> Result<PathBuf, String> {
+    match settings::get(app).save_dir {
+        Some(dir) if !dir.is_empty() => Ok(PathBuf::from(dir)),
+        _ => default_root(app),
+    }
+}
+
+pub fn default_root(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app.path().video_dir().map_err(|e| e.to_string())?.join("Orbit"))
+}
+
+/// Let the window show files from the save folder (thumbnails, viewer, player).
+/// Only this folder is allowed, nothing else on the PC.
+pub fn allow_in_window(app: &AppHandle) {
+    if let Ok(root) = save_root(app) {
+        let _ = std::fs::create_dir_all(&root);
+        let _ = app.asset_protocol_scope().allow_directory(&root, true);
+    }
+}
+
+/// Check that Orbit can create and write files in `dir`.
+pub fn check_writable(dir: &str) -> Result<(), String> {
+    let dir = PathBuf::from(dir);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Can't use that folder: {e}"))?;
+    let probe = dir.join(".orbit-write-test");
+    std::fs::write(&probe, b"ok").map_err(|e| format!("Can't save in that folder: {e}"))?;
+    let _ = std::fs::remove_file(probe);
+    Ok(())
 }
 
 /// Name like Orbit_2026-11-12_20-56-03-123.ext (used for temp folders).

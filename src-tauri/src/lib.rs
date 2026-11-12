@@ -63,7 +63,14 @@ fn set_settings(app: AppHandle, new: settings::Settings) -> Result<(), String> {
     if new.start_with_windows != old.start_with_windows {
         tray::set_autostart(&app, new.start_with_windows)?;
     }
+    let folder_changed = new.save_dir != old.save_dir;
+    if let (true, Some(dir)) = (folder_changed, &new.save_dir) {
+        common::check_writable(dir)?;
+    }
     settings::set(&app, new)?;
+    if folder_changed {
+        common::allow_in_window(&app);
+    }
     if theme_changed {
         apply_window_theme(&app);
     }
@@ -83,6 +90,32 @@ pub(crate) fn apply_window_theme(app: &AppHandle) {
         let bg = if light { (244, 244, 245) } else { (0, 0, 0) };
         let _ = window.set_background_color(Some(Color(bg.0, bg.1, bg.2, 255)));
     }
+}
+
+/// The save folder in use, and the default one (for Settings).
+#[tauri::command]
+fn save_folders(app: AppHandle) -> Result<(String, String), String> {
+    Ok((
+        common::save_root(&app)?.to_string_lossy().into_owned(),
+        common::default_root(&app)?.to_string_lossy().into_owned(),
+    ))
+}
+
+/// Windows' "choose a folder" dialog. None if cancelled.
+#[tauri::command]
+async fn pick_folder(app: AppHandle) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Choose where Orbit saves your screenshots, clips and recordings")
+            .blocking_pick_folder()
+            .and_then(|p| p.into_path().ok())
+            .map(|p| p.to_string_lossy().into_owned())
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 /// Hotkeys are off while choosing a new one in Settings.
@@ -219,6 +252,7 @@ pub fn run() {
             Some(vec!["--minimized"]),
         ))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -263,12 +297,15 @@ pub fn run() {
             list_audio_devices,
             start_audio_test,
             stop_audio_test,
-            pause_hotkeys
+            pause_hotkeys,
+            save_folders,
+            pick_folder
         ])
         .setup(|app| {
             let handle = app.handle();
             settings::load(handle);
             hotkeys::load(handle, &settings::get(handle));
+            common::allow_in_window(handle);
             tray::create(handle)?;
             // Started by Windows at login: stay in the tray. Otherwise open the window.
             if !tray::started_minimized() {
