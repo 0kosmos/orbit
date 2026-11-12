@@ -1,4 +1,5 @@
 mod common;
+mod media;
 mod recorder;
 mod replay;
 mod screenshot;
@@ -47,6 +48,29 @@ fn set_settings(app: AppHandle, new: settings::Settings) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn list_media(app: AppHandle) -> Result<Vec<media::MediaItem>, String> {
+    media::list(&app)
+}
+
+/// `async` + `spawn_blocking`: runs FFmpeg on a worker thread so the window never freezes.
+#[tauri::command]
+async fn thumbnail(app: AppHandle, path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || media::thumbnail(&app, &path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn open_media(app: AppHandle, path: String) -> Result<(), String> {
+    media::open(&app, &path)
+}
+
+#[tauri::command]
+fn open_media_folder(app: AppHandle) -> Result<(), String> {
+    media::open_folder(&app)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Default hotkeys (configurable in Settings later).
@@ -82,7 +106,11 @@ pub fn run() {
             is_replay_running,
             save_replay,
             get_settings,
-            set_settings
+            set_settings,
+            list_media,
+            thumbnail,
+            open_media,
+            open_media_folder
         ])
         .setup(move |app| {
             let handle = app.handle();
