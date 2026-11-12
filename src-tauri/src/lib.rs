@@ -1,6 +1,7 @@
 mod audio;
 mod common;
 mod game;
+mod hotkeys;
 mod media;
 mod recorder;
 mod replay;
@@ -8,8 +9,8 @@ mod screenshot;
 mod settings;
 mod sound;
 
-use tauri::{AppHandle, RunEvent};
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri::{AppHandle, Emitter, RunEvent};
+use tauri_plugin_global_shortcut::ShortcutState;
 
 #[tauri::command]
 fn toggle_recording(app: AppHandle) {
@@ -43,12 +44,33 @@ fn get_settings(app: AppHandle) -> settings::Settings {
 
 #[tauri::command]
 fn set_settings(app: AppHandle, new: settings::Settings) -> Result<(), String> {
-    let length_changed = new.replay_seconds != settings::get(&app).replay_seconds;
+    let old = settings::get(&app);
+    let length_changed = new.replay_seconds != old.replay_seconds;
+    let hotkeys_changed = new.hotkey_screenshot != old.hotkey_screenshot
+        || new.hotkey_record != old.hotkey_record
+        || new.hotkey_replay != old.hotkey_replay;
+
+    // Try new hotkeys first: if one can't be used, nothing is saved.
+    if hotkeys_changed {
+        hotkeys::apply(&app, &new)?;
+    }
     settings::set(&app, new)?;
     if length_changed {
         replay::restart(&app);
     }
+    // Tell the window (e.g. the hotkey hints in the sidebar).
+    let _ = app.emit("settings-changed", settings::get(&app));
     Ok(())
+}
+
+/// Hotkeys are off while choosing a new one in Settings.
+#[tauri::command]
+fn pause_hotkeys(app: AppHandle, paused: bool) {
+    if paused {
+        hotkeys::pause(&app);
+    } else {
+        hotkeys::resume(&app);
+    }
 }
 
 #[tauri::command]
@@ -108,30 +130,25 @@ fn open_media_folder(app: AppHandle) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Default hotkeys (configurable in Settings later).
-    let screenshot_key = Shortcut::new(Some(Modifiers::ALT), Code::F12);
-    let record_key = Shortcut::new(Some(Modifiers::ALT), Code::F9);
-    let replay_key = Shortcut::new(Some(Modifiers::ALT), Code::F10);
-
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(move |app, shortcut, event| {
+                .with_handler(|app, shortcut, event| {
                     if event.state() != ShortcutState::Pressed {
                         return;
                     }
-                    if *shortcut == screenshot_key {
-                        screenshot::take(app.clone());
-                    } else if *shortcut == record_key {
-                        recorder::toggle(app);
-                    } else if *shortcut == replay_key {
-                        replay::save(app.clone());
+                    match hotkeys::action_for(app, shortcut) {
+                        Some(hotkeys::Action::Screenshot) => screenshot::take(app.clone()),
+                        Some(hotkeys::Action::Record) => recorder::toggle(app),
+                        Some(hotkeys::Action::SaveReplay) => replay::save(app.clone()),
+                        None => {}
                     }
                 })
                 .build(),
         )
         .manage(settings::SettingsState::default())
+        .manage(hotkeys::Hotkeys::default())
         .manage(recorder::Recorder::default())
         .manage(replay::Replay::default())
         .manage(audio::LevelTest::default())
@@ -150,18 +167,13 @@ pub fn run() {
             open_media_folder,
             list_audio_devices,
             start_audio_test,
-            stop_audio_test
+            stop_audio_test,
+            pause_hotkeys
         ])
-        .setup(move |app| {
+        .setup(|app| {
             let handle = app.handle();
             settings::load(handle);
-
-            // If another app already uses a hotkey, don't crash; just report it.
-            for key in [screenshot_key, record_key, replay_key] {
-                if let Err(e) = app.global_shortcut().register(key) {
-                    eprintln!("Could not register hotkey {key}: {e}");
-                }
-            }
+            hotkeys::load(handle, &settings::get(handle));
 
             if settings::get(handle).replay_autostart {
                 replay::start(handle);

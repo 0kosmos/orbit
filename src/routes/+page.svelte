@@ -4,8 +4,21 @@
   import Toast from "$lib/Toast.svelte";
   import ToggleButton from "$lib/ToggleButton.svelte";
 
+  import { invoke } from "@tauri-apps/api/core";
+  import { listen } from "@tauri-apps/api/event";
+  import { hotkeyLabel } from "$lib/hotkey";
+
   type Tab = "gallery" | "settings";
   let tab = $state<Tab>("gallery");
+
+  // Hotkey hints on the sidebar buttons; updated when Settings changes them.
+  type Keys = { hotkey_record: string; hotkey_replay: string };
+  let keys = $state<Keys>({ hotkey_record: "Alt+F9", hotkey_replay: "Alt+F10" });
+  $effect(() => {
+    invoke<Keys>("get_settings").then((s) => (keys = s));
+    const stop = listen<Keys>("settings-changed", (e) => (keys = e.payload));
+    return () => stop.then((s) => s());
+  });
 </script>
 
 <div class="app">
@@ -18,7 +31,7 @@
       <ToggleButton
         labelOff="Replay buffer off"
         labelOn="Replay buffer on"
-        hint="Alt+F10 saves"
+        hint="{hotkeyLabel(keys.hotkey_replay)} saves"
         statusCommand="is_replay_running"
         toggleCommand="toggle_replay"
         onEvents={["replay-started"]}
@@ -27,7 +40,7 @@
       <ToggleButton
         labelOff="Record"
         labelOn="Stop recording"
-        hint="Alt+F9"
+        hint={hotkeyLabel(keys.hotkey_record)}
         statusCommand="is_recording"
         toggleCommand="toggle_recording"
         onEvents={["recording-started"]}

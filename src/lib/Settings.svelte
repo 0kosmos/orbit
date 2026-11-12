@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
+  import { hotkeyFromEvent, hotkeyLabel } from "$lib/hotkey";
 
   // Must match the Settings struct in src-tauri/src/settings.rs
   type Settings = {
@@ -11,7 +12,11 @@
     system_device: string | null;
     mic_enabled: boolean;
     mic_device: string | null;
+    hotkey_screenshot: string;
+    hotkey_record: string;
+    hotkey_replay: string;
   };
+  type HotkeyField = "hotkey_screenshot" | "hotkey_record" | "hotkey_replay";
   // Must match DeviceList in src-tauri/src/audio.rs
   type DeviceList = { default_name: string | null; devices: { id: string; name: string }[] };
   type Kind = "game" | "mic";
@@ -87,6 +92,69 @@
     };
   });
 
+  // --- Hotkeys: click one, then press the new key combination ---
+  const hotkeyRows: { field: HotkeyField; label: string }[] = [
+    { field: "hotkey_screenshot", label: "Take screenshot" },
+    { field: "hotkey_record", label: "Start / stop recording" },
+    { field: "hotkey_replay", label: "Save replay (last X minutes)" },
+  ];
+  let capturing = $state<HotkeyField | null>(null);
+  let hotkeyError = $state("");
+
+  function startCapture(field: HotkeyField) {
+    capturing = field;
+    hotkeyError = "";
+    // Hotkeys off meanwhile, so pressing e.g. Alt+F12 here doesn't take a screenshot.
+    invoke("pause_hotkeys", { paused: true });
+  }
+
+  function endCapture() {
+    capturing = null;
+    invoke("pause_hotkeys", { paused: false });
+  }
+
+  async function onKeydown(e: KeyboardEvent) {
+    if (!capturing || !settings) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.code === "Escape") {
+      endCapture();
+      return;
+    }
+    const result = hotkeyFromEvent(e);
+    if (result === null) return; // only Ctrl/Alt/Shift held so far
+    if (typeof result !== "string") {
+      hotkeyError = result.error;
+      return;
+    }
+    const field = capturing;
+    const old = settings[field];
+    settings[field] = result;
+    capturing = null;
+    try {
+      await invoke("set_settings", { new: settings });
+      hotkeyError = "";
+    } catch (err) {
+      settings[field] = old;
+      hotkeyError = String(err);
+    }
+    invoke("pause_hotkeys", { paused: false });
+  }
+
+  function resetHotkeys() {
+    if (!settings) return;
+    settings.hotkey_screenshot = "Alt+F12";
+    settings.hotkey_record = "Alt+F9";
+    settings.hotkey_replay = "Alt+F10";
+    hotkeyError = "";
+    invoke("set_settings", { new: settings }).catch((err) => (hotkeyError = String(err)));
+  }
+
+  // Leaving Settings while choosing a hotkey: turn hotkeys back on.
+  $effect(() => () => {
+    if (capturing) invoke("pause_hotkeys", { paused: false });
+  });
+
   // Show the level on a decibel scale (-60 dB .. 0 dB), like a mixer.
   let barPercent = $derived(
     level <= 0 ? 0 : Math.max(0, Math.min(100, ((20 * Math.log10(level) + 60) / 60) * 100)),
@@ -124,9 +192,33 @@
   {/if}
 {/snippet}
 
+<svelte:window onkeydown={onKeydown} />
+
 <h1>Settings</h1>
 
 {#if settings}
+  <section>
+    <h2>Hotkeys</h2>
+
+    {#each hotkeyRows as row}
+      <div class="row hotkey-row">
+        <span>{row.label}</span>
+        <button
+          class="hotkey"
+          class:capturing={capturing === row.field}
+          onclick={() => (capturing === row.field ? endCapture() : startCapture(row.field))}
+        >
+          {capturing === row.field ? "Press keys… (Esc to cancel)" : hotkeyLabel(settings[row.field])}
+        </button>
+      </div>
+    {/each}
+
+    {#if hotkeyError}
+      <p class="error">{hotkeyError}</p>
+    {/if}
+    <button class="link" onclick={resetHotkeys}>Reset to defaults</button>
+  </section>
+
   <section>
     <h2>Replay buffer</h2>
 
@@ -267,5 +359,37 @@
   }
   .error {
     color: #ff9a9a;
+  }
+  .hotkey-row {
+    justify-content: space-between;
+  }
+  .hotkey {
+    min-width: 170px;
+    padding: 5px 12px;
+    border: 1px solid #2a2a2a;
+    border-radius: 6px;
+    background: #111;
+    color: #e6e6e6;
+    font: inherit;
+    cursor: pointer;
+  }
+  .hotkey:hover {
+    border-color: #444;
+  }
+  .hotkey.capturing {
+    border-color: #e53935;
+    color: #fff;
+  }
+  .link {
+    padding: 0;
+    border: none;
+    background: none;
+    color: #888;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .link:hover {
+    color: #fff;
   }
 </style>

@@ -22,6 +22,10 @@ pub struct Settings {
     pub mic_enabled: bool,
     /// Which mic (Windows device id). None = the Windows default mic.
     pub mic_device: Option<String>,
+    /// Hotkeys, like "Alt+F12" or "Ctrl+Shift+KeyS".
+    pub hotkey_screenshot: String,
+    pub hotkey_record: String,
+    pub hotkey_replay: String,
 }
 
 impl Default for Settings {
@@ -34,6 +38,9 @@ impl Default for Settings {
             system_device: None,
             mic_enabled: false,
             mic_device: None,
+            hotkey_screenshot: "Alt+F12".into(),
+            hotkey_record: "Alt+F9".into(),
+            hotkey_replay: "Alt+F10".into(),
         }
     }
 }
