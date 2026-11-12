@@ -21,6 +21,8 @@ pub struct Replay {
     dir: Mutex<Option<PathBuf>>,
     /// Set when the length changed: start again as soon as FFmpeg has quit.
     restart: AtomicBool,
+    /// Names of the audio tracks in the buffer ("Game + Mic", "Game", "Mic").
+    tracks: Mutex<Vec<&'static str>>,
 }
 
 pub fn is_running(app: &AppHandle) -> bool {
@@ -74,15 +76,12 @@ fn try_start(app: &AppHandle) -> Result<(), String> {
     // Keep a few more pieces than needed, so the ones we join are never being overwritten.
     let pieces = settings::get(app).replay_seconds / SEGMENT_SECONDS + 3;
 
-    let audio_pipe = match settings::get(app).system_audio {
-        true => Some(audio::start_loopback()?),
-        false => None,
-    };
+    let pipes = common::start_audio(app)?;
 
     let mut cmd = common::ffmpeg();
     cmd.arg("-y");
     // (The keyframe every second lets pieces be cut cleanly every 5 seconds.)
-    common::add_capture_args(&mut cmd, audio_pipe.as_deref());
+    let tracks = common::add_capture_args(&mut cmd, &pipes);
     cmd.args([
         "-f",
         "segment",
@@ -96,11 +95,9 @@ fn try_start(app: &AppHandle) -> Result<(), String> {
     .arg(dir.join("buf_%03d.ts"));
 
     let done_app = app.clone();
-    let pipe = audio_pipe.clone();
+    let done_pipes = pipes.clone();
     let started = state.ffmpeg.start(cmd, move |result| {
-        if let Some(pipe) = &pipe {
-            audio::release(pipe);
-        }
+        audio::release(&done_pipes);
         let state = done_app.state::<Replay>();
         if state.restart.swap(false, Ordering::Relaxed) {
             start(&done_app);
@@ -115,12 +112,11 @@ fn try_start(app: &AppHandle) -> Result<(), String> {
         };
     });
     if let Err(err) = started {
-        if let Some(pipe) = &audio_pipe {
-            audio::release(pipe);
-        }
+        audio::release(&pipes);
         return Err(err);
     }
     *state.dir.lock().unwrap() = Some(dir);
+    *state.tracks.lock().unwrap() = tracks;
     let _ = app.emit("replay-started", ());
     Ok(())
 }
@@ -186,10 +182,17 @@ fn try_save(app: &AppHandle) -> Result<String, String> {
 
     // Join without re-encoding (-c copy): fast and no quality loss.
     let out = common::orbit_dir(app, "Clips")?.join(common::timestamp_name("mp4"));
-    let output = common::ffmpeg()
-        .args(["-y", "-f", "concat", "-safe", "0", "-i"])
+    // "-map 0" keeps every track (video, game sound, mic), not just the first audio one.
+    let mut cmd = common::ffmpeg();
+    cmd.args(["-y", "-f", "concat", "-safe", "0", "-i"])
         .arg(&list_path)
-        .args(["-c", "copy", "-movflags", "+faststart"])
+        .args(["-map", "0", "-c", "copy", "-movflags", "+faststart"]);
+    // The .ts pieces can't store track names, so add them again.
+    for (i, title) in app.state::<Replay>().tracks.lock().unwrap().iter().enumerate() {
+        cmd.arg(format!("-metadata:s:a:{i}"))
+            .arg(format!("title={title}"));
+    }
+    let output = cmd
         .arg(&out)
         .output()
         .map_err(|e| format!("Could not start FFmpeg: {e}"))?;

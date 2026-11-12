@@ -16,6 +16,12 @@ pub struct Settings {
     pub sounds: bool,
     /// Record game / PC sound (what plays on the default speakers or headphones).
     pub system_audio: bool,
+    /// Which playback device to record (Windows device id). None = the Windows default.
+    pub system_device: Option<String>,
+    /// Record the microphone as a separate track.
+    pub mic_enabled: bool,
+    /// Which mic (Windows device id). None = the Windows default mic.
+    pub mic_device: Option<String>,
 }
 
 impl Default for Settings {
@@ -25,6 +31,9 @@ impl Default for Settings {
             replay_autostart: false,
             sounds: true,
             system_audio: true,
+            system_device: None,
+            mic_enabled: false,
+            mic_device: None,
         }
     }
 }

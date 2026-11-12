@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use crate::{audio, settings};
 use tauri::{AppHandle, Manager};
 
 // Stops Windows from flashing a black console window when FFmpeg starts.
@@ -37,21 +38,69 @@ pub fn timestamp_name(ext: &str) -> String {
     )
 }
 
-/// Inputs, encoders and stream mapping shared by recording and the replay buffer.
-/// `audio_pipe`: where to read PC sound from (see audio.rs), or None for video only.
-pub fn add_capture_args(cmd: &mut Command, audio_pipe: Option<&str>) {
-    if let Some(pipe) = audio_pipe {
-        cmd.args(["-thread_queue_size", "1024", "-f", "f32le", "-ar"])
-            .arg(crate::audio::SAMPLE_RATE.to_string())
-            .arg("-ac")
-            .arg(crate::audio::CHANNELS.to_string())
-            .arg("-i")
-            .arg(pipe);
+/// Starts the sound sources that are turned on in Settings: PC sound first, then the mic.
+pub fn start_audio(app: &AppHandle) -> Result<Vec<audio::Pipe>, String> {
+    let s = settings::get(app);
+    let mut pipes = Vec::new();
+    if s.system_audio {
+        pipes.push(audio::start(audio::Source::System(s.system_device))?);
     }
+    if s.mic_enabled {
+        match audio::start(audio::Source::Mic(s.mic_device)) {
+            Ok(pipe) => pipes.push(pipe),
+            Err(e) => {
+                audio::release(&pipes);
+                return Err(e);
+            }
+        }
+    }
+    Ok(pipes)
+}
+
+/// Inputs, filters, encoders and track layout shared by recording and the replay buffer.
+/// `pipes`: sound sources from `start_audio` (can be empty for video only).
+/// Returns the names of the audio tracks in the file, in order.
+///
+/// With game sound AND mic:
+///   track 1 "Game + Mic" (mixed; the one every player plays),
+///   track 2 "Game", track 3 "Mic" (separate, for video editors).
+/// With only one of them: a single track with that name.
+pub fn add_capture_args(cmd: &mut Command, pipes: &[audio::Pipe]) -> Vec<&'static str> {
+    for pipe in pipes {
+        cmd.args(["-thread_queue_size", "1024", "-f", "f32le", "-ar"])
+            .arg(audio::SAMPLE_RATE.to_string())
+            .arg("-ac")
+            .arg(pipe.channels.to_string())
+            .arg("-i")
+            .arg(&pipe.name);
+    }
+
     // Video: Desktop Duplication + NVIDIA GPU encoder, a keyframe every second.
-    cmd.args([
-        "-filter_complex",
-        "ddagrab=framerate=60[v]",
+    let mut graph = String::from("ddagrab=framerate=60[v]");
+    // (output label or input stream, track name, bitrate)
+    let mut tracks: Vec<(String, &'static str, &'static str)> = Vec::new();
+
+    let name_of = |pipe: &audio::Pipe| if pipe.channels == 1 { "Mic" } else { "Game" };
+    let bitrate_of = |pipe: &audio::Pipe| if pipe.channels == 1 { "96k" } else { "160k" };
+
+    if pipes.len() == 2 {
+        // Copy both sources (asplit), turn the mono mic into stereo, and mix one
+        // copy of each. normalize=0 keeps both at their own volume (no halving).
+        graph.push_str(
+            ";[0:a]asplit=2[g1][g2];[1:a]asplit=2[m1][m2]\
+             ;[m1]aformat=channel_layouts=stereo[m1s]\
+             ;[g1][m1s]amix=inputs=2:duration=longest:normalize=0[mix]",
+        );
+        tracks.push(("[mix]".into(), "Game + Mic", "192k"));
+        tracks.push(("[g2]".into(), name_of(&pipes[0]), bitrate_of(&pipes[0])));
+        tracks.push(("[m2]".into(), name_of(&pipes[1]), bitrate_of(&pipes[1])));
+    } else {
+        for (i, pipe) in pipes.iter().enumerate() {
+            tracks.push((format!("{i}:a"), name_of(pipe), bitrate_of(pipe)));
+        }
+    }
+
+    cmd.arg("-filter_complex").arg(graph).args([
         "-map",
         "[v]",
         "-c:v",
@@ -61,9 +110,18 @@ pub fn add_capture_args(cmd: &mut Command, audio_pipe: Option<&str>) {
         "-g",
         "60",
     ]);
-    if audio_pipe.is_some() {
-        cmd.args(["-map", "0:a", "-c:a", "aac", "-b:a", "160k"]);
+    // Named tracks, so video editors show "Game + Mic" / "Game" / "Mic".
+    for (i, (source, title, bitrate)) in tracks.iter().enumerate() {
+        cmd.arg("-map")
+            .arg(source)
+            .arg(format!("-c:a:{i}"))
+            .arg("aac")
+            .arg(format!("-b:a:{i}"))
+            .arg(bitrate)
+            .arg(format!("-metadata:s:a:{i}"))
+            .arg(format!("title={title}"));
     }
+    tracks.into_iter().map(|(_, title, _)| title).collect()
 }
 
 /// One FFmpeg process running in the background (a recording or the replay buffer).

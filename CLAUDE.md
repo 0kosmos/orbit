@@ -49,5 +49,7 @@ Later: per-game filters, screenshot resize/crop, clip trimming, audio (game + mi
 - [x] Step 4: replay buffer (sidebar toggle, Alt+F10 saves MP4 → Videos\Orbit\Clips; 5s .ts segments with -segment_wrap in app cache dir; settings.json for replay length + autostart)
 - [x] Step 5: simple gallery (lists Videos\Orbit\{Screenshots,Clips,Recordings}; lazy 320px JPG thumbs via FFmpeg cached in app cache\thumbs, max 3 at once; click opens in default Windows app; asset protocol scoped to $APPCACHE/thumbs)
 - [x] Step 6: save sound feedback (built-in WAVs played via Windows PlaySound; on/off setting)
-- [ ] Step 7: game/PC audio (WASAPI loopback in Rust → named pipe → FFmpeg AAC; silence padded by clock). FFmpeg build has no WASAPI input, only dshow (mic visible there).
-- [ ] Step 8: microphone
+- [x] Step 7: game/PC audio (WASAPI loopback in Rust → named pipe → FFmpeg AAC; silence padded by clock). FFmpeg build has no WASAPI input, only dshow (mic visible there).
+- [ ] Step 8: microphone (WASAPI capture → second pipe; off by default, device picker in Settings) + output-device picker for game sound + "Test" level meter for both
+  - Track layout with game + mic: 1 "Game + Mic" (amix normalize=0; most players only play track 1), 2 "Game", 3 "Mic". User chose this over mic-only-separate.
+  - User's PC uses Voicemeeter: Windows default output = "Voicemeeter AUX Input", but their apps play elsewhere → loopback of the default captured only Orbit's own beeps (files peaked at exactly -30 dB). Hence the game-sound device picker.

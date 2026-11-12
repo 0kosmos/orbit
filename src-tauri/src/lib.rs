@@ -63,6 +63,30 @@ async fn thumbnail(app: AppHandle, path: String) -> Result<String, String> {
         .map_err(|e| e.to_string())?
 }
 
+/// Playback devices (`outputs = true`) or microphones. Runs on a worker thread,
+/// because Windows' audio system needs its own thread setup.
+#[tauri::command]
+async fn list_audio_devices(outputs: bool) -> Result<audio::DeviceList, String> {
+    tauri::async_runtime::spawn_blocking(move || audio::list_devices(outputs))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Start the live level bar in Settings. `kind` is "game" or "mic".
+#[tauri::command]
+fn start_audio_test(app: AppHandle, kind: String, device: Option<String>) {
+    let source = match kind.as_str() {
+        "mic" => audio::Source::Mic(device),
+        _ => audio::Source::System(device),
+    };
+    audio::start_test(&app, source);
+}
+
+#[tauri::command]
+fn stop_audio_test(app: AppHandle) {
+    audio::stop_test(&app);
+}
+
 #[tauri::command]
 fn open_media(app: AppHandle, path: String) -> Result<(), String> {
     media::open(&app, &path)
@@ -101,6 +125,7 @@ pub fn run() {
         .manage(settings::SettingsState::default())
         .manage(recorder::Recorder::default())
         .manage(replay::Replay::default())
+        .manage(audio::LevelTest::default())
         .invoke_handler(tauri::generate_handler![
             toggle_recording,
             is_recording,
@@ -112,7 +137,10 @@ pub fn run() {
             list_media,
             thumbnail,
             open_media,
-            open_media_folder
+            open_media_folder,
+            list_audio_devices,
+            start_audio_test,
+            stop_audio_test
         ])
         .setup(move |app| {
             let handle = app.handle();
