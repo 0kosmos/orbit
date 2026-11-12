@@ -188,10 +188,7 @@ fn try_save(app: &AppHandle) -> Result<String, String> {
         .arg(&list_path)
         .args(["-map", "0", "-c", "copy", "-movflags", "+faststart"]);
     // The .ts pieces can't store track names, so add them again.
-    for (i, title) in app.state::<Replay>().tracks.lock().unwrap().iter().enumerate() {
-        cmd.arg(format!("-metadata:s:a:{i}"))
-            .arg(format!("title={title}"));
-    }
+    common::add_track_names(&mut cmd, &app.state::<Replay>().tracks.lock().unwrap());
     let output = cmd
         .arg(&out)
         .output()

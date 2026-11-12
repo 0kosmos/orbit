@@ -195,3 +195,14 @@ pub fn media_name(ext: &str) -> String {
         chrono::Local::now().format("%Y-%m-%d_%H-%M-%S-%3f")
     )
 }
+
+/// Names the audio tracks ("Game + Mic", "Game", "Mic") in an MP4. MP4 keeps track
+/// names as "handler name", which is what players and editors show, so set both.
+pub fn add_track_names(cmd: &mut Command, tracks: &[&str]) {
+    for (i, title) in tracks.iter().enumerate() {
+        cmd.arg(format!("-metadata:s:a:{i}"))
+            .arg(format!("title={title}"))
+            .arg(format!("-metadata:s:a:{i}"))
+            .arg(format!("handler_name={title}"));
+    }
+}

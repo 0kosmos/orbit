@@ -1,6 +1,7 @@
 <script lang="ts">
   import { convertFileSrc, invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
+  import Viewer from "$lib/Viewer.svelte";
 
   // Must match MediaItem in src-tauri/src/media.rs
   type Kind = "screenshot" | "clip" | "recording";
@@ -126,6 +127,18 @@
     }
   }
 
+  // --- In-app viewer ---
+  // Path of the file open in the viewer (null = closed).
+  let viewing = $state<string | null>(null);
+
+  // Deleting from the viewer: show the next file (or the previous one at the end).
+  async function removeFromViewer(item: Item) {
+    const i = shown.findIndex((x) => x.path === item.path);
+    await remove(item);
+    if (items.some((x) => x.path === item.path)) return; // delete failed
+    viewing = (shown[i] ?? shown[i - 1])?.path ?? null;
+  }
+
   function formatDate(ms: number) {
     return new Date(ms).toLocaleString(undefined, {
       day: "numeric",
@@ -194,7 +207,7 @@
       <div class="card" data-path={item.path} use:lazy>
         <button
           class="open"
-          onclick={() => invoke("open_media", { path: item.path })}
+          onclick={() => (viewing = item.path)}
           title={item.name}
         >
           <div class="thumb">
@@ -223,6 +236,20 @@
       </div>
     {/each}
   </div>
+{/if}
+
+{#if viewing}
+  <!-- The viewer follows the file by its path, so new saves arriving
+       while it's open don't make it jump to another file. -->
+  <Viewer
+    items={shown}
+    bind:index={
+      () => shown.findIndex((i) => i.path === viewing),
+      (v) => (viewing = shown[v]?.path ?? null)
+    }
+    onclose={() => (viewing = null)}
+    ondelete={removeFromViewer}
+  />
 {/if}
 
 <style>

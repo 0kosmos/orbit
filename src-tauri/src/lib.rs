@@ -124,6 +124,11 @@ fn open_media(app: AppHandle, path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn show_in_folder(app: AppHandle, path: String) -> Result<(), String> {
+    media::show_in_folder(&app, &path)
+}
+
+#[tauri::command]
 fn open_media_folder(app: AppHandle) -> Result<(), String> {
     media::open_folder(&app)
 }
@@ -165,6 +170,7 @@ pub fn run() {
             delete_media,
             open_media,
             open_media_folder,
+            show_in_folder,
             list_audio_devices,
             start_audio_test,
             stop_audio_test,

@@ -222,6 +222,14 @@ pub fn open(app: &AppHandle, path: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Open Explorer with this file selected.
+pub fn show_in_folder(app: &AppHandle, path: &str) -> Result<(), String> {
+    let file = checked(app, path)?;
+    app.opener()
+        .reveal_item_in_dir(&file)
+        .map_err(|e| e.to_string())
+}
+
 /// Open Videos\Orbit in Explorer.
 pub fn open_folder(app: &AppHandle) -> Result<(), String> {
     let root = common::orbit_dir(app, "")?;
