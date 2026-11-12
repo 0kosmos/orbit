@@ -1,6 +1,7 @@
 <script lang="ts">
   import Gallery from "$lib/Gallery.svelte";
   import Settings from "$lib/Settings.svelte";
+  import Toast from "$lib/Toast.svelte";
 
   type Tab = "gallery" | "settings";
   let tab = $state<Tab>("gallery");
@@ -21,6 +22,8 @@
     {/if}
   </main>
 </div>
+
+<Toast />
 
 <style>
   :global(html, body) {

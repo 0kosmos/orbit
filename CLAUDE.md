@@ -43,4 +43,6 @@ Later: per-game filters, screenshot resize/crop, clip trimming, audio (game + mi
 - After each phase: explain how to measure total RAM (all processes incl. WebView2) and idle CPU, warn if something increases them, and suggest a cheaper option if there is one.
 
 ## Progress
-- [ ] Step 1: app shell
+- [x] Step 1: app shell
+- [x] Step 2: screenshot hotkey (Alt+F12, FFmpeg ddagrab one frame → Videos\Orbit\Screenshots, ~0.5s; works in fullscreen game; CPU blip 0.1–0.2%)
+- [ ] Step 3: record / stop
