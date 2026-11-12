@@ -81,7 +81,7 @@ fn try_start(app: &AppHandle) -> Result<(), String> {
     let mut cmd = common::ffmpeg();
     cmd.arg("-y");
     // (The keyframe every second lets pieces be cut cleanly every 5 seconds.)
-    let tracks = common::add_capture_args(&mut cmd, &pipes);
+    let tracks = common::add_capture_args(&mut cmd, &pipes, &crate::settings::get(app));
     cmd.args([
         "-f",
         "segment",

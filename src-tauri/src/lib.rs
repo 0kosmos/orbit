@@ -45,7 +45,8 @@ fn get_settings(app: AppHandle) -> settings::Settings {
 #[tauri::command]
 fn set_settings(app: AppHandle, new: settings::Settings) -> Result<(), String> {
     let old = settings::get(&app);
-    let length_changed = new.replay_seconds != old.replay_seconds;
+    // Anything that changes how video/sound is captured restarts a running replay buffer.
+    let capture_changed = new.capture_differs(&old);
     let hotkeys_changed = new.hotkey_screenshot != old.hotkey_screenshot
         || new.hotkey_record != old.hotkey_record
         || new.hotkey_replay != old.hotkey_replay;
@@ -55,7 +56,7 @@ fn set_settings(app: AppHandle, new: settings::Settings) -> Result<(), String> {
         hotkeys::apply(&app, &new)?;
     }
     settings::set(&app, new)?;
-    if length_changed {
+    if capture_changed {
         replay::restart(&app);
     }
     // Tell the window (e.g. the hotkey hints in the sidebar).

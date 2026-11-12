@@ -65,7 +65,11 @@ pub fn start_audio(app: &AppHandle) -> Result<Vec<audio::Pipe>, String> {
 ///   track 1 "Game + Mic" (mixed; the one every player plays),
 ///   track 2 "Game", track 3 "Mic" (separate, for video editors).
 /// With only one of them: a single track with that name.
-pub fn add_capture_args(cmd: &mut Command, pipes: &[audio::Pipe]) -> Vec<&'static str> {
+pub fn add_capture_args(
+    cmd: &mut Command,
+    pipes: &[audio::Pipe],
+    s: &settings::Settings,
+) -> Vec<&'static str> {
     for pipe in pipes {
         cmd.args(["-thread_queue_size", "1024", "-f", "f32le", "-ar"])
             .arg(audio::SAMPLE_RATE.to_string())
@@ -76,12 +80,16 @@ pub fn add_capture_args(cmd: &mut Command, pipes: &[audio::Pipe]) -> Vec<&'stati
     }
 
     // Video: Desktop Duplication + NVIDIA GPU encoder, a keyframe every second.
-    let mut graph = String::from("ddagrab=framerate=60[v]");
+    let fps = s.fps();
+    let mut graph = format!("ddagrab=framerate={fps}:draw_mouse={}[v]", s.draw_mouse as u8);
     // (output label or input stream, track name, bitrate)
-    let mut tracks: Vec<(String, &'static str, &'static str)> = Vec::new();
+    let mut tracks: Vec<(String, &'static str, String)> = Vec::new();
 
+    let game_rate = format!("{}k", s.audio_bitrate.clamp(64, 320));
     let name_of = |pipe: &audio::Pipe| if pipe.channels == 1 { "Mic" } else { "Game" };
-    let bitrate_of = |pipe: &audio::Pipe| if pipe.channels == 1 { "96k" } else { "160k" };
+    let bitrate_of = |pipe: &audio::Pipe| {
+        if pipe.channels == 1 { "96k".to_string() } else { game_rate.clone() }
+    };
 
     if pipes.len() == 2 {
         // Copy both sources (asplit), turn the mono mic into stereo, and mix one
@@ -91,7 +99,7 @@ pub fn add_capture_args(cmd: &mut Command, pipes: &[audio::Pipe]) -> Vec<&'stati
              ;[m1]aformat=channel_layouts=stereo[m1s]\
              ;[g1][m1s]amix=inputs=2:duration=longest:normalize=0[mix]",
         );
-        tracks.push(("[mix]".into(), "Game + Mic", "192k"));
+        tracks.push(("[mix]".into(), "Game + Mic", game_rate.clone()));
         tracks.push(("[g2]".into(), name_of(&pipes[0]), bitrate_of(&pipes[0])));
         tracks.push(("[m2]".into(), name_of(&pipes[1]), bitrate_of(&pipes[1])));
     } else {
@@ -100,16 +108,11 @@ pub fn add_capture_args(cmd: &mut Command, pipes: &[audio::Pipe]) -> Vec<&'stati
         }
     }
 
-    cmd.arg("-filter_complex").arg(graph).args([
-        "-map",
-        "[v]",
-        "-c:v",
-        "h264_nvenc",
-        "-cq",
-        "23",
-        "-g",
-        "60",
-    ]);
+    cmd.arg("-filter_complex")
+        .arg(graph)
+        .args(["-map", "[v]", "-c:v", "h264_nvenc", "-preset", s.nvenc_preset()])
+        .args(["-cq", s.cq(), "-g"])
+        .arg(fps.to_string());
     // Named tracks, so video editors show "Game + Mic" / "Game" / "Mic".
     for (i, (source, title, bitrate)) in tracks.iter().enumerate() {
         cmd.arg("-map")

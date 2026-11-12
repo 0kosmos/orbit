@@ -119,7 +119,8 @@ pub fn preview(app: &AppHandle, path: &str) -> Result<Preview, String> {
         .ok_or("Bad file name")?
         .to_string_lossy()
         .into_owned();
-    let is_image = name.to_lowercase().ends_with(".png");
+    let lower = name.to_lowercase();
+    let is_image = lower.ends_with(".png") || lower.ends_with(".jpg");
 
     let dir = thumbs_dir(app)?;
     let thumb = dir.join(format!("{name}.jpg"));

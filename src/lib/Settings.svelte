@@ -2,6 +2,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { hotkeyFromEvent, hotkeyLabel } from "$lib/hotkey";
+  import Segmented from "$lib/Segmented.svelte";
 
   // Must match the Settings struct in src-tauri/src/settings.rs
   type Settings = {
@@ -15,26 +16,69 @@
     hotkey_screenshot: string;
     hotkey_record: string;
     hotkey_replay: string;
+    video_fps: number;
+    video_quality: string;
+    encoder_preset: string;
+    draw_mouse: boolean;
+    audio_bitrate: number;
+    screenshot_format: string;
   };
   type HotkeyField = "hotkey_screenshot" | "hotkey_record" | "hotkey_replay";
   // Must match DeviceList in src-tauri/src/audio.rs
   type DeviceList = { default_name: string | null; devices: { id: string; name: string }[] };
   type Kind = "game" | "mic";
 
-  const lengths = [
-    { seconds: 30, label: "30 seconds" },
-    { seconds: 60, label: "1 minute" },
-    { seconds: 120, label: "2 minutes" },
-    { seconds: 300, label: "5 minutes" },
-    { seconds: 600, label: "10 minutes" },
+  const fpsOptions = [30, 60, 90, 120, 144].map((v) => ({ value: v, label: String(v) }));
+  const qualityOptions = [
+    { value: "low", label: "Low" },
+    { value: "medium", label: "Medium" },
+    { value: "high", label: "High" },
+    { value: "very_high", label: "Very high" },
+  ];
+  const presetOptions = [
+    { value: "fastest", label: "Fastest" },
+    { value: "balanced", label: "Balanced" },
+    { value: "quality", label: "Quality" },
+  ];
+  const audioOptions = [128, 160, 192, 256].map((v) => ({ value: v, label: `${v} kbps` }));
+  const formatOptions = [
+    { value: "png", label: "PNG" },
+    { value: "jpg", label: "JPG" },
   ];
 
+  // Replay length slider: these steps (seconds), from 15 seconds to 20 minutes.
+  const replayLengths = [15, 30, 45, 60, 90, 120, 180, 240, 300, 420, 600, 900, 1200];
+  // The slider moves over the list position; the setting stores seconds.
+  let replayIndex = $state(5);
+  function closestLength(seconds: number) {
+    let best = 0;
+    replayLengths.forEach((v, i) => {
+      if (Math.abs(v - seconds) < Math.abs(replayLengths[best] - seconds)) best = i;
+    });
+    return best;
+  }
+  function lengthLabel(seconds: number) {
+    if (seconds < 60) return `${seconds} seconds`;
+    const m = seconds / 60;
+    return m === 1 ? "1 minute" : `${m} minutes`;
+  }
+
   let settings = $state<Settings | null>(null);
+
+  // Rough disk use of the buffer per minute at each quality (game footage, 60 fps).
+  let mbPerMinute = $derived(
+    (({ low: 40, medium: 70, high: 110, very_high: 180 }) as Record<string, number>)[
+      settings?.video_quality ?? "high"
+    ] * ((settings?.video_fps ?? 60) / 60),
+  );
   let error = $state("");
   let outputs = $state<DeviceList>({ default_name: null, devices: [] });
   let mics = $state<DeviceList>({ default_name: null, devices: [] });
 
-  invoke<Settings>("get_settings").then((s) => (settings = s));
+  invoke<Settings>("get_settings").then((s) => {
+    settings = s;
+    replayIndex = closestLength(s.replay_seconds);
+  });
   // Asked once each time Settings opens (so a newly plugged-in device shows up).
   invoke<DeviceList>("list_audio_devices", { outputs: true }).then((d) => (outputs = d));
   invoke<DeviceList>("list_audio_devices", { outputs: false }).then((d) => (mics = d));
@@ -220,16 +264,61 @@
   </section>
 
   <section>
-    <h2>Replay buffer</h2>
+    <h2>Video</h2>
+
+    <div class="row setting">
+      <span>Frames per second</span>
+      <Segmented options={fpsOptions} bind:value={settings.video_fps} onchange={save} />
+    </div>
+    <p class="note">
+      60 is smooth and light. Higher needs more GPU and disk, and only helps on a
+      high-refresh monitor.
+    </p>
+
+    <div class="row setting">
+      <span>Quality</span>
+      <Segmented options={qualityOptions} bind:value={settings.video_quality} onchange={save} />
+    </div>
+    <p class="note">Higher quality = bigger files. "High" is a good balance.</p>
+
+    <div class="row setting">
+      <span>Encoder speed</span>
+      <Segmented options={presetOptions} bind:value={settings.encoder_preset} onchange={save} />
+    </div>
+    <p class="note">
+      "Fastest" puts the least load on your GPU (best for FPS in games), "Quality" makes
+      slightly better video for the same file size.
+    </p>
 
     <label class="row">
-      <span>Save the last</span>
-      <select bind:value={settings.replay_seconds} onchange={save}>
-        {#each lengths as l}
-          <option value={l.seconds}>{l.label}</option>
-        {/each}
-      </select>
+      <input type="checkbox" bind:checked={settings.draw_mouse} onchange={save} />
+      <span>Show the mouse cursor in recordings and screenshots</span>
     </label>
+  </section>
+
+  <section>
+    <h2>Replay buffer</h2>
+
+    <div class="row setting">
+      <span>Save the last</span>
+      <strong>{lengthLabel(replayLengths[replayIndex])}</strong>
+    </div>
+    <input
+      class="slider"
+      type="range"
+      min="0"
+      max={replayLengths.length - 1}
+      step="1"
+      bind:value={replayIndex}
+      oninput={() => (settings!.replay_seconds = replayLengths[replayIndex])}
+      onchange={save}
+    />
+    <p class="note">
+      Longer = more temporary disk space (roughly {Math.max(
+        1,
+        Math.round((replayLengths[replayIndex] / 60) * mbPerMinute),
+      )} MB), same CPU and GPU.
+    </p>
 
     <label class="row">
       <input type="checkbox" bind:checked={settings.replay_autostart} onchange={save} />
@@ -260,10 +349,29 @@
       <p class="error indent">Test failed: {testError}</p>
     {/if}
 
+    <div class="row setting">
+      <span>Sound quality</span>
+      <Segmented options={audioOptions} bind:value={settings.audio_bitrate} onchange={save} />
+    </div>
+  </section>
+
+  <section>
+    <h2>Screenshots</h2>
+
+    <div class="row setting">
+      <span>Format</span>
+      <Segmented options={formatOptions} bind:value={settings.screenshot_format} onchange={save} />
+    </div>
     <p class="note">
-      Applies to the next recording. If the replay buffer is on, turn it off and on again.
+      PNG is lossless. JPG is usually several times smaller for games (but not for plain
+      desktop screenshots).
     </p>
   </section>
+
+  <p class="note">
+    Changes apply to the next recording. A running replay buffer restarts by itself (its
+    saved time starts over).
+  </p>
 
   <section>
     <h2>Feedback</h2>
@@ -359,6 +467,15 @@
   }
   .error {
     color: #ff9a9a;
+  }
+  .setting {
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+  .slider {
+    width: 100%;
+    margin: 0 0 12px;
+    accent-color: #e53935;
   }
   .hotkey-row {
     justify-content: space-between;
