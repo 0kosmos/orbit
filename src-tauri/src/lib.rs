@@ -8,6 +8,7 @@ mod replay;
 mod screenshot;
 mod settings;
 mod sound;
+mod stats;
 mod tray;
 
 use tauri::window::Color;
@@ -24,6 +25,23 @@ async fn toggle_recording(app: AppHandle) {
 #[tauri::command]
 fn is_recording(app: AppHandle) -> bool {
     recorder::is_recording(&app)
+}
+
+/// When the running recording started (ms since 1970), or null.
+#[tauri::command]
+fn recording_since(app: AppHandle) -> Option<u64> {
+    recorder::recording_since(&app)
+}
+
+/// Total size and count of everything in the save folder (for the Home page).
+#[tauri::command]
+async fn storage_summary(app: AppHandle) -> Result<(u64, usize), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let items = media::list(&app)?;
+        Ok((items.iter().map(|i| i.size()).sum(), items.len()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -77,6 +95,8 @@ fn set_settings(app: AppHandle, new: settings::Settings) -> Result<(), String> {
     if capture_changed {
         replay::restart(&app);
     }
+    // Status bar switched on: start measuring.
+    stats::ensure_running(&app);
     // Tell the window (e.g. the hotkey hints in the sidebar).
     let _ = app.emit("settings-changed", settings::get(&app));
     Ok(())
@@ -280,6 +300,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             toggle_recording,
             is_recording,
+            recording_since,
+            storage_summary,
             toggle_replay,
             is_replay_running,
             save_replay,

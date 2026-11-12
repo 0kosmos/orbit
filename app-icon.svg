@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Orbit app icon: a white planet with a ring, on a dark rounded square.
+       Regenerate all icon sizes with:  npx tauri icon app-icon.svg -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c1c20" />
+      <stop offset="1" stop-color="#050506" />
+    </linearGradient>
+    <radialGradient id="planet" cx="0.36" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#ffffff" />
+      <stop offset="0.65" stop-color="#e4e4e8" />
+      <stop offset="1" stop-color="#a9a9b2" />
+    </radialGradient>
+    <!-- Upper / lower half of the (tilted) ring: back half and front half. -->
+    <clipPath id="back"><rect x="0" y="0" width="1024" height="512" /></clipPath>
+    <clipPath id="front"><rect x="0" y="512" width="1024" height="512" /></clipPath>
+    <clipPath id="planetShape"><circle cx="512" cy="512" r="200" /></clipPath>
+  </defs>
+
+  <rect x="40" y="40" width="944" height="944" rx="220" fill="url(#bg)" />
+  <rect x="41" y="41" width="942" height="942" rx="219" fill="none" stroke="#2c2c31" stroke-width="2" />
+
+  <!-- Ring, back half (goes behind the planet) -->
+  <g transform="rotate(-22 512 512)">
+    <ellipse cx="512" cy="512" rx="372" ry="118" fill="none" stroke="#8d8d96" stroke-width="44" clip-path="url(#back)" />
+  </g>
+
+  <!-- Planet -->
+  <circle cx="512" cy="512" r="200" fill="url(#planet)" />
+
+  <!-- Ring, front half: a dark gap where it crosses the planet, then the white ring -->
+  <g clip-path="url(#planetShape)">
+    <g transform="rotate(-22 512 512)">
+      <ellipse cx="512" cy="512" rx="372" ry="118" fill="none" stroke="#0b0b0d" stroke-width="84" clip-path="url(#front)" />
+    </g>
+  </g>
+  <g transform="rotate(-22 512 512)">
+    <ellipse cx="512" cy="512" rx="372" ry="118" fill="none" stroke="#ffffff" stroke-width="44" clip-path="url(#front)" />
+  </g>
+</svg>

@@ -64,6 +64,44 @@
       .sort(compare[sort]),
   );
 
+  // Count per type (for the filter buttons), within the chosen game.
+  let counts = $derived.by(() => {
+    const c: Record<string, number> = { all: 0, screenshot: 0, clip: 0, recording: 0 };
+    for (const i of items) {
+      if (gameFilter !== "all" && i.game !== gameFilter) continue;
+      c.all++;
+      c[i.kind]++;
+    }
+    return c;
+  });
+
+  // Sorted by date: grouped under "Today", "Yesterday", "Monday 10 November" ...
+  // Sorted by size: one group without a heading.
+  function dayLabel(ms: number) {
+    const d = new Date(ms);
+    const today = new Date();
+    const start = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const days = Math.round((start(today) - start(d)) / 86400000);
+    if (days === 0) return "Today";
+    if (days === 1) return "Yesterday";
+    return d.toLocaleDateString(undefined, {
+      weekday: days < 7 ? "long" : undefined,
+      day: "numeric",
+      month: "long",
+      year: d.getFullYear() === today.getFullYear() ? undefined : "numeric",
+    });
+  }
+  let groups = $derived.by(() => {
+    if (sort !== "newest" && sort !== "oldest") return [{ label: "", items: shown }];
+    const out: { label: string; items: Item[] }[] = [];
+    for (const i of shown) {
+      const label = dayLabel(i.modified);
+      if (out.at(-1)?.label !== label) out.push({ label, items: [] });
+      out.at(-1)!.items.push(i);
+    }
+    return out;
+  });
+
   async function refresh() {
     items = await invoke<Item[]>("list_media");
   }
@@ -315,6 +353,7 @@
     {#each filters as f}
       <button class="chip" class:active={filter === f.value} onclick={() => (filter = f.value)}>
         {f.label}
+        <span class="count">{counts[f.value]}</span>
       </button>
     {/each}
   </div>
@@ -343,8 +382,16 @@
     <p class="faint">Take a screenshot, record, or save a replay and it shows up here.</p>
   </div>
 {:else}
-  <div class="grid" class:room={selecting}>
-    {#each shown as item (item.path)}
+  <div class:room={selecting}>
+  {#each groups as group (group.label)}
+    {#if group.label}
+      <div class="day">
+        <span>{group.label}</span>
+        <span class="faint">{group.items.length}</span>
+      </div>
+    {/if}
+  <div class="grid">
+    {#each group.items as item (item.path)}
       {@const preview = previews[item.path]}
       <div
         class="card"
@@ -407,6 +454,8 @@
         {/if}
       </div>
     {/each}
+  </div>
+  {/each}
   </div>
 {/if}
 
@@ -523,8 +572,33 @@
     margin: 4px 0;
   }
 
-  .grid.room {
+  .room {
     padding-bottom: 70px;
+  }
+  /* Date heading above each day's files */
+  .day {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 22px 2px 10px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .day:first-child {
+    margin-top: 4px;
+  }
+  .day .faint {
+    font-weight: 400;
+    font-size: 12px;
+  }
+  .chip .count {
+    margin-left: 4px;
+    color: var(--text-faint);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+  }
+  .chip.active .count {
+    color: var(--text-muted);
   }
   .grid {
     display: grid;

@@ -23,6 +23,7 @@ pub fn show_main_window(app: &AppHandle) {
         Ok(window) => {
             crate::apply_window_theme(app);
             let _ = window.set_focus();
+            crate::stats::ensure_running(app);
         }
         Err(e) => eprintln!("Could not open the window: {e}"),
     }

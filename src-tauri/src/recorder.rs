@@ -1,11 +1,19 @@
 use crate::audio;
 use crate::common::{self, Background};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use crate::sound::{self, Sound};
 use tauri::{AppHandle, Emitter, Manager};
 
 #[derive(Default)]
 pub struct Recorder(Background);
+
+/// When the current recording started (milliseconds since 1970), for the timer in the UI.
+static SINCE: AtomicU64 = AtomicU64::new(0);
+
+pub fn recording_since(app: &AppHandle) -> Option<u64> {
+    is_recording(app).then(|| SINCE.load(Ordering::Relaxed))
+}
 
 pub fn is_recording(app: &AppHandle) -> bool {
     app.state::<Recorder>().0.is_running()
@@ -55,6 +63,7 @@ fn start(app: &AppHandle) -> Result<(), String> {
         audio::release(&pipes);
         return Err(err);
     }
+    SINCE.store(chrono::Local::now().timestamp_millis() as u64, Ordering::Relaxed);
     sound::play(app, Sound::Start);
     let _ = app.emit("recording-started", ());
     Ok(())

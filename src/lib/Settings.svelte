@@ -3,7 +3,8 @@
   import { listen } from "@tauri-apps/api/event";
   import { hotkeyFromEvent, hotkeyLabel } from "$lib/hotkey";
   import Segmented from "$lib/Segmented.svelte";
-  import { applyUi } from "$lib/ui.svelte";
+  import { applyUi, ms } from "$lib/ui.svelte";
+  import { fly } from "svelte/transition";
 
   // Must match the Settings struct in src-tauri/src/settings.rs
   type Settings = {
@@ -28,6 +29,7 @@
     blur: boolean;
     close_to_tray: boolean;
     save_dir: string | null;
+    status_bar: boolean;
     start_with_windows: boolean;
   };
   type HotkeyField = "hotkey_screenshot" | "hotkey_record" | "hotkey_replay";
@@ -76,6 +78,17 @@
   }
 
   let settings = $state<Settings | null>(null);
+  // Settings are split into categories; only the chosen one is shown.
+  type Category = "general" | "capture" | "audio" | "replay" | "hotkeys" | "storage";
+  let cat = $state<Category>("general");
+  const categories: { id: Category; label: string; icon: string }[] = [
+    { id: "general", label: "General", icon: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" },
+    { id: "capture", label: "Video & screenshots", icon: "M15 10l5-3v10l-5-3M3 7h12v10H3z" },
+    { id: "audio", label: "Audio", icon: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3" },
+    { id: "replay", label: "Replay buffer", icon: "M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 8v4l3 2" },
+    { id: "hotkeys", label: "Hotkeys", icon: "M3 7h18v10H3zM7 11h.01M11 11h.01M15 11h.01M8 14h8" },
+    { id: "storage", label: "Storage & system", icon: "M4 6h16M4 6v12h16V6M9 10h6" },
+  ];
 
   // Rough disk use of the buffer per minute at each quality (game footage, 60 fps).
   let mbPerMinute = $derived(
@@ -301,238 +314,327 @@
 
 <h1>Settings</h1>
 
-{#if settings}
-  <!-- Appearance -->
-  <section class="card">
-    <h2>Appearance</h2>
-
-    <div class="row">
-      <div class="label"><span>Theme</span></div>
-      <Segmented options={themeOptions} bind:value={settings.theme} onchange={saveLook} />
-    </div>
-
-    <label class="row">
-      <div class="label">
-        <span>Animations</span>
-        <span class="desc">Short, smooth motion when you click or open things. Off = everything instant.</span>
-      </div>
-      <input type="checkbox" class="switch" bind:checked={settings.animations} onchange={saveLook} />
-    </label>
-
-    <label class="row">
-      <div class="label">
-        <span>Blur &amp; transparency</span>
-        <span class="desc">Frosted glass behind the viewer, notifications and filter bar.</span>
-      </div>
-      <input type="checkbox" class="switch" bind:checked={settings.blur} onchange={saveLook} />
-    </label>
-  </section>
-
-  <!-- Hotkeys -->
-  <section class="card">
-    <h2>Hotkeys</h2>
-
-    {#each hotkeyRows as row}
-      <div class="row">
-        <div class="label"><span>{row.label}</span></div>
-        <button
-          class="hotkey"
-          class:capturing={capturing === row.field}
-          onclick={() => (capturing === row.field ? endCapture() : startCapture(row.field))}
-        >
-          {capturing === row.field ? "Press keys… (Esc cancels)" : hotkeyLabel(settings[row.field])}
-        </button>
-      </div>
-    {/each}
-
-    {#if hotkeyError}
-      <p class="error">{hotkeyError}</p>
-    {/if}
-    <button class="btn ghost small" onclick={resetHotkeys}>Reset to defaults</button>
-  </section>
-
-  <!-- Video -->
-  <section class="card">
-    <h2>Video</h2>
-
-    <div class="row">
-      <div class="label">
-        <span>Frames per second</span>
-        <span class="desc">60 is smooth and light. Higher needs more GPU and disk.</span>
-      </div>
-      <Segmented options={fpsOptions} bind:value={settings.video_fps} onchange={save} />
-    </div>
-
-    <div class="row">
-      <div class="label">
-        <span>Quality</span>
-        <span class="desc">Higher = bigger files. "High" is a good balance.</span>
-      </div>
-      <Segmented options={qualityOptions} bind:value={settings.video_quality} onchange={save} />
-    </div>
-
-    <div class="row">
-      <div class="label">
-        <span>Encoder speed</span>
-        <span class="desc">"Fastest" is lightest on your GPU (best for in-game FPS).</span>
-      </div>
-      <Segmented options={presetOptions} bind:value={settings.encoder_preset} onchange={save} />
-    </div>
-
-    <label class="row">
-      <div class="label"><span>Show mouse cursor</span></div>
-      <input type="checkbox" class="switch" bind:checked={settings.draw_mouse} onchange={save} />
-    </label>
-  </section>
-
-  <!-- Replay buffer -->
-  <section class="card">
-    <h2>Replay buffer</h2>
-
-    <div class="row">
-      <div class="label"><span>Save the last</span></div>
-      <strong class="value">{lengthLabel(replayLengths[replayIndex])}</strong>
-    </div>
-    <input
-      class="range"
-      type="range"
-      min="0"
-      max={replayLengths.length - 1}
-      step="1"
-      bind:value={replayIndex}
-      oninput={() => (settings!.replay_seconds = replayLengths[replayIndex])}
-      onchange={save}
-    />
-    <p class="desc">
-      Uses roughly {Math.max(1, Math.round((replayLengths[replayIndex] / 60) * mbPerMinute))} MB of
-      temporary disk space. Same CPU and GPU at any length.
-    </p>
-
-    <label class="row">
-      <div class="label"><span>Turn on when Orbit opens</span></div>
-      <input type="checkbox" class="switch" bind:checked={settings.replay_autostart} onchange={save} />
-    </label>
-  </section>
-
-  <!-- Audio -->
-  <section class="card">
-    <h2>Audio</h2>
-
-    <label class="row">
-      <div class="label"><span>Record game / PC sound</span></div>
-      <input type="checkbox" class="switch" bind:checked={settings.system_audio} onchange={save} />
-    </label>
-    {#if settings.system_audio}
-      {@render devicePicker("game", outputs)}
-    {/if}
-
-    <label class="row">
-      <div class="label">
-        <span>Record microphone</span>
-        <span class="desc">Mixed into the main track, plus its own track for editing.</span>
-      </div>
-      <input type="checkbox" class="switch" bind:checked={settings.mic_enabled} onchange={save} />
-    </label>
-    {#if settings.mic_enabled}
-      {@render devicePicker("mic", mics)}
-    {/if}
-
-    {#if testError}
-      <p class="error">Test failed: {testError}</p>
-    {/if}
-
-    <div class="row">
-      <div class="label"><span>Sound quality</span></div>
-      <Segmented options={audioOptions} bind:value={settings.audio_bitrate} onchange={save} />
-    </div>
-  </section>
-
-  <!-- Screenshots -->
-  <section class="card">
-    <h2>Screenshots</h2>
-
-    <div class="row">
-      <div class="label">
-        <span>Format</span>
-        <span class="desc">PNG is lossless. JPG is usually much smaller for games.</span>
-      </div>
-      <Segmented options={formatOptions} bind:value={settings.screenshot_format} onchange={save} />
-    </div>
-  </section>
-
-  <!-- Feedback -->
-  <section class="card">
-    <h2>Feedback</h2>
-
-    <label class="row">
-      <div class="label">
-        <span>Sounds</span>
-        <span class="desc">A short beep when saving, starting a recording, or on errors.</span>
-      </div>
-      <input type="checkbox" class="switch" bind:checked={settings.sounds} onchange={save} />
-    </label>
-  </section>
-
-  <!-- Storage -->
-  <section class="card">
-    <h2>Storage</h2>
-
-    <div class="row">
-      <div class="label">
-        <span>Save folder</span>
-        <span class="desc path" title={folder}>{folder}</span>
-      </div>
-      <div class="folder-buttons">
-        <button class="btn" onclick={chooseFolder}>Change…</button>
-        <button class="btn ghost" onclick={() => invoke("open_media_folder")}>Open</button>
-      </div>
-    </div>
-    {#if settings.save_dir}
-      <button class="btn ghost small" onclick={() => setFolder(null)}>
-        Reset to default ({defaultFolder})
+<div class="layout">
+  <!-- Categories -->
+  <nav class="cats">
+    {#each categories as c}
+      <button class="cat" class:active={cat === c.id} onclick={() => (cat = c.id)}>
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <path d={c.icon} fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        {c.label}
       </button>
+    {/each}
+  </nav>
+
+  <div class="panel">
+    {#if settings}
+    {#key cat}
+    <div in:fly={{ y: 6, duration: ms(180) }}>
+      {#if cat === "general"}
+        <!-- Appearance -->
+        <section class="card">
+          <h2>Appearance</h2>
+
+          <div class="row">
+            <div class="label"><span>Theme</span></div>
+            <Segmented options={themeOptions} bind:value={settings.theme} onchange={saveLook} />
+          </div>
+
+          <label class="row">
+            <div class="label">
+              <span>Animations</span>
+              <span class="desc">Short, smooth motion when you click or open things. Off = everything instant.</span>
+            </div>
+            <input type="checkbox" class="switch" bind:checked={settings.animations} onchange={saveLook} />
+          </label>
+
+          <label class="row">
+            <div class="label">
+              <span>Blur &amp; transparency</span>
+              <span class="desc">Frosted glass behind the viewer, notifications and filter bar.</span>
+            </div>
+            <input type="checkbox" class="switch" bind:checked={settings.blur} onchange={saveLook} />
+          </label>
+
+          <label class="row">
+            <div class="label">
+              <span>Status bar</span>
+              <span class="desc">Version, CPU / GPU / RAM and time at the bottom. Measures every 2 s, only while this window is open.</span>
+            </div>
+            <input type="checkbox" class="switch" bind:checked={settings.status_bar} onchange={save} />
+          </label>
+        </section>
+        <!-- Feedback -->
+        <section class="card">
+          <h2>Feedback</h2>
+
+          <label class="row">
+            <div class="label">
+              <span>Sounds</span>
+              <span class="desc">A short beep when saving, starting a recording, or on errors.</span>
+            </div>
+            <input type="checkbox" class="switch" bind:checked={settings.sounds} onchange={save} />
+          </label>
+        </section>
+        <!-- System -->
+        <section class="card">
+          <h2>System</h2>
+
+          <label class="row">
+            <div class="label">
+              <span>Keep running in the tray when closed</span>
+              <span class="desc">
+                Closing the window frees its memory; hotkeys, recording and the replay buffer keep
+                working. Open Orbit again from the icon next to the clock.
+              </span>
+            </div>
+            <input type="checkbox" class="switch" bind:checked={settings.close_to_tray} onchange={save} />
+          </label>
+
+          <label class="row">
+            <div class="label">
+              <span>Start with Windows</span>
+              <span class="desc">Starts quietly in the tray, without opening the window.</span>
+            </div>
+            <input type="checkbox" class="switch" bind:checked={settings.start_with_windows} onchange={saveStartup} />
+          </label>
+        </section>
+      {/if}
+      {#if cat === "capture"}
+        <!-- Video -->
+        <section class="card">
+          <h2>Video</h2>
+
+          <div class="row">
+            <div class="label">
+              <span>Frames per second</span>
+              <span class="desc">60 is smooth and light. Higher needs more GPU and disk.</span>
+            </div>
+            <Segmented options={fpsOptions} bind:value={settings.video_fps} onchange={save} />
+          </div>
+
+          <div class="row">
+            <div class="label">
+              <span>Quality</span>
+              <span class="desc">Higher = bigger files. "High" is a good balance.</span>
+            </div>
+            <Segmented options={qualityOptions} bind:value={settings.video_quality} onchange={save} />
+          </div>
+
+          <div class="row">
+            <div class="label">
+              <span>Encoder speed</span>
+              <span class="desc">"Fastest" is lightest on your GPU (best for in-game FPS).</span>
+            </div>
+            <Segmented options={presetOptions} bind:value={settings.encoder_preset} onchange={save} />
+          </div>
+
+          <label class="row">
+            <div class="label"><span>Show mouse cursor</span></div>
+            <input type="checkbox" class="switch" bind:checked={settings.draw_mouse} onchange={save} />
+          </label>
+        </section>
+        <!-- Screenshots -->
+        <section class="card">
+          <h2>Screenshots</h2>
+
+          <div class="row">
+            <div class="label">
+              <span>Format</span>
+              <span class="desc">PNG is lossless. JPG is usually much smaller for games.</span>
+            </div>
+            <Segmented options={formatOptions} bind:value={settings.screenshot_format} onchange={save} />
+          </div>
+        </section>
+        <p class="footnote">
+          Recording changes apply to the next recording. A running replay buffer restarts by itself
+          (its saved time starts over).
+        </p>
+      {/if}
+      {#if cat === "audio"}
+        <!-- Audio -->
+        <section class="card">
+          <h2>Audio</h2>
+
+          <label class="row">
+            <div class="label"><span>Record game / PC sound</span></div>
+            <input type="checkbox" class="switch" bind:checked={settings.system_audio} onchange={save} />
+          </label>
+          {#if settings.system_audio}
+            {@render devicePicker("game", outputs)}
+          {/if}
+
+          <label class="row">
+            <div class="label">
+              <span>Record microphone</span>
+              <span class="desc">Mixed into the main track, plus its own track for editing.</span>
+            </div>
+            <input type="checkbox" class="switch" bind:checked={settings.mic_enabled} onchange={save} />
+          </label>
+          {#if settings.mic_enabled}
+            {@render devicePicker("mic", mics)}
+          {/if}
+
+          {#if testError}
+            <p class="error">Test failed: {testError}</p>
+          {/if}
+
+          <div class="row">
+            <div class="label"><span>Sound quality</span></div>
+            <Segmented options={audioOptions} bind:value={settings.audio_bitrate} onchange={save} />
+          </div>
+        </section>
+        <p class="footnote">
+          Recording changes apply to the next recording. A running replay buffer restarts by itself
+          (its saved time starts over).
+        </p>
+      {/if}
+      {#if cat === "replay"}
+        <!-- Replay buffer -->
+        <section class="card">
+          <h2>Replay buffer</h2>
+
+          <div class="row">
+            <div class="label"><span>Save the last</span></div>
+            <strong class="value">{lengthLabel(replayLengths[replayIndex])}</strong>
+          </div>
+          <input
+            class="range"
+            type="range"
+            min="0"
+            max={replayLengths.length - 1}
+            step="1"
+            bind:value={replayIndex}
+            oninput={() => (settings!.replay_seconds = replayLengths[replayIndex])}
+            onchange={save}
+          />
+          <p class="desc">
+            Uses roughly {Math.max(1, Math.round((replayLengths[replayIndex] / 60) * mbPerMinute))} MB of
+            temporary disk space. Same CPU and GPU at any length.
+          </p>
+
+          <label class="row">
+            <div class="label"><span>Turn on when Orbit opens</span></div>
+            <input type="checkbox" class="switch" bind:checked={settings.replay_autostart} onchange={save} />
+          </label>
+        </section>
+        <p class="footnote">
+          Recording changes apply to the next recording. A running replay buffer restarts by itself
+          (its saved time starts over).
+        </p>
+      {/if}
+      {#if cat === "hotkeys"}
+        <!-- Hotkeys -->
+        <section class="card">
+          <h2>Hotkeys</h2>
+
+          {#each hotkeyRows as row}
+            <div class="row">
+              <div class="label"><span>{row.label}</span></div>
+              <button
+                class="hotkey"
+                class:capturing={capturing === row.field}
+                onclick={() => (capturing === row.field ? endCapture() : startCapture(row.field))}
+              >
+                {capturing === row.field ? "Press keys… (Esc cancels)" : hotkeyLabel(settings[row.field])}
+              </button>
+            </div>
+          {/each}
+
+          {#if hotkeyError}
+            <p class="error">{hotkeyError}</p>
+          {/if}
+          <button class="btn ghost small" onclick={resetHotkeys}>Reset to defaults</button>
+        </section>
+      {/if}
+      {#if cat === "storage"}
+        <!-- Storage -->
+        <section class="card">
+          <h2>Storage</h2>
+
+          <div class="row">
+            <div class="label">
+              <span>Save folder</span>
+              <span class="desc path" title={folder}>{folder}</span>
+            </div>
+            <div class="folder-buttons">
+              <button class="btn" onclick={chooseFolder}>Change…</button>
+              <button class="btn ghost" onclick={() => invoke("open_media_folder")}>Open</button>
+            </div>
+          </div>
+          {#if settings.save_dir}
+            <button class="btn ghost small" onclick={() => setFolder(null)}>
+              Reset to default ({defaultFolder})
+            </button>
+          {/if}
+          <p class="desc folder-note">
+            Screenshots, Clips and Recordings folders are made inside it. Files already saved stay
+            where they are (move them yourself in Explorer if you want them in the new folder).
+          </p>
+        </section>
+      {/if}
+    </div>
+    {/key}
     {/if}
-    <p class="desc folder-note">
-      Screenshots, Clips and Recordings folders are made inside it. Files already saved stay
-      where they are (move them yourself in Explorer if you want them in the new folder).
-    </p>
-  </section>
 
-  <!-- System -->
-  <section class="card">
-    <h2>System</h2>
-
-    <label class="row">
-      <div class="label">
-        <span>Keep running in the tray when closed</span>
-        <span class="desc">
-          Closing the window frees its memory; hotkeys, recording and the replay buffer keep
-          working. Open Orbit again from the icon next to the clock.
-        </span>
-      </div>
-      <input type="checkbox" class="switch" bind:checked={settings.close_to_tray} onchange={save} />
-    </label>
-
-    <label class="row">
-      <div class="label">
-        <span>Start with Windows</span>
-        <span class="desc">Starts quietly in the tray, without opening the window.</span>
-      </div>
-      <input type="checkbox" class="switch" bind:checked={settings.start_with_windows} onchange={saveStartup} />
-    </label>
-  </section>
-
-  <p class="footnote">
-    Recording changes apply to the next recording. A running replay buffer restarts by itself
-    (its saved time starts over).
-  </p>
-{/if}
-
-{#if error}
-  <p class="error">{error}</p>
-{/if}
+    {#if error}
+      <p class="error">{error}</p>
+    {/if}
+  </div>
+</div>
 
 <style>
+  /* Two columns: categories on the left, the chosen settings on the right. */
+  .layout {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 680px);
+    gap: 28px;
+    align-items: start;
+  }
+  .cats {
+    position: sticky;
+    top: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .cat {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+    transition:
+      background var(--fast) var(--ease),
+      color var(--fast) var(--ease);
+  }
+  .cat:hover {
+    background: var(--surface-hover);
+    color: var(--text);
+  }
+  .cat.active {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  /* Narrow window: categories become a row above the settings. */
+  @media (max-width: 900px) {
+    .layout {
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+    .cats {
+      position: static;
+      flex-direction: row;
+      flex-wrap: wrap;
+    }
+  }
   h1 {
     margin: 0 0 20px;
     font-size: 24px;
@@ -540,7 +642,6 @@
     letter-spacing: -0.3px;
   }
   .card {
-    max-width: 640px;
     margin-bottom: 16px;
     padding: 18px 20px 8px;
     border: 1px solid var(--border);

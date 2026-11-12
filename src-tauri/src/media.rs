@@ -18,6 +18,12 @@ pub struct MediaItem {
     size: u64,
 }
 
+impl MediaItem {
+    pub fn size(&self) -> u64 {
+        self.size
+    }
+}
+
 /// (folder inside Videos\Orbit, kind sent to the UI)
 const FOLDERS: [(&str, &str); 3] = [
     ("Screenshots", "screenshot"),
