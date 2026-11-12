@@ -35,17 +35,6 @@ fn recording_since(app: AppHandle) -> Option<u64> {
     recorder::recording_since(&app)
 }
 
-/// Total size and count of everything in the save folder (for the Home page).
-#[tauri::command]
-async fn storage_summary(app: AppHandle) -> Result<(u64, usize), String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let items = media::list(&app)?;
-        Ok((items.iter().map(|i| i.size()).sum(), items.len()))
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
 #[tauri::command]
 async fn toggle_replay(app: AppHandle) {
     let _ = tauri::async_runtime::spawn_blocking(move || replay::toggle(&app)).await;
@@ -384,7 +373,6 @@ pub fn run() {
             toggle_recording,
             is_recording,
             recording_since,
-            storage_summary,
             toggle_replay,
             is_replay_running,
             save_replay,

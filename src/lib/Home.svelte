@@ -33,6 +33,8 @@
 
   async function loadRecent() {
     const items = await invoke<Item[]>("list_media");
+    // Storage total from the same list (no second pass over the folder).
+    storage = [items.reduce((sum, i) => sum + i.size, 0), items.length];
     recent = items.slice(0, 15);
     for (const it of recent) {
       if (thumbs[it.path]) continue;
@@ -40,7 +42,6 @@
         .then((p) => (thumbs[it.path] = { src: convertFileSrc(p.thumb), duration: p.duration }))
         .catch(() => {});
     }
-    storage = await invoke<[number, number]>("storage_summary");
   }
 
   async function loadRecording() {
