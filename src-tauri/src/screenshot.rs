@@ -1,9 +1,5 @@
-use std::os::windows::process::CommandExt;
-use std::process::Command;
-use tauri::{AppHandle, Emitter, Manager};
-
-// Stops Windows from flashing a black console window when FFmpeg starts.
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+use crate::common;
+use tauri::{AppHandle, Emitter};
 
 /// Takes a screenshot on a background thread so the app never freezes.
 /// Tells the UI the result with a "screenshot-saved" or "screenshot-failed" event.
@@ -19,27 +15,12 @@ pub fn take(app: AppHandle) {
 }
 
 fn capture(app: &AppHandle) -> Result<String, String> {
-    // Videos\Orbit\Screenshots
-    let dir = app
-        .path()
-        .video_dir()
-        .map_err(|e| e.to_string())?
-        .join("Orbit")
-        .join("Screenshots");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-
-    let name = chrono::Local::now()
-        .format("Orbit_%Y-%m-%d_%H-%M-%S-%3f.png")
-        .to_string();
-    let path = dir.join(name);
+    let path = common::orbit_dir(app, "Screenshots")?.join(common::timestamp_name("png"));
 
     // Grab one frame with Windows Desktop Duplication (ddagrab), copy it from the GPU,
     // and save it as PNG. FFmpeg then exits, so there's no cost when idle.
-    let output = Command::new("ffmpeg")
+    let output = common::ffmpeg()
         .args([
-            "-hide_banner",
-            "-loglevel",
-            "error",
             "-y",
             "-filter_complex",
             "ddagrab=framerate=60,hwdownload,format=bgra",
@@ -47,7 +28,6 @@ fn capture(app: &AppHandle) -> Result<String, String> {
             "1",
         ])
         .arg(&path)
-        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map_err(|e| format!("Could not start FFmpeg: {e}"))?;
 

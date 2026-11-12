@@ -21,6 +21,11 @@
         show(`Screenshot saved: ${file}`);
       }),
       listen<string>("screenshot-failed", (e) => show(`Screenshot failed: ${e.payload}`, true)),
+      listen<string>("recording-saved", (e) => {
+        const file = e.payload.split("\\").pop();
+        show(`Recording saved: ${file}`);
+      }),
+      listen<string>("recording-failed", (e) => show(`Recording failed: ${e.payload}`, true)),
     ];
     return () => stops.forEach((p) => p.then((stop) => stop()));
   });

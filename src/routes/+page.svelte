@@ -2,6 +2,7 @@
   import Gallery from "$lib/Gallery.svelte";
   import Settings from "$lib/Settings.svelte";
   import Toast from "$lib/Toast.svelte";
+  import RecordButton from "$lib/RecordButton.svelte";
 
   type Tab = "gallery" | "settings";
   let tab = $state<Tab>("gallery");
@@ -12,6 +13,7 @@
     <div class="logo">Orbit</div>
     <button class:active={tab === "gallery"} onclick={() => (tab = "gallery")}>Gallery</button>
     <button class:active={tab === "settings"} onclick={() => (tab = "settings")}>Settings</button>
+    <RecordButton />
   </nav>
 
   <main class="content">
