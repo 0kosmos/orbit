@@ -26,6 +26,12 @@
         show(`Recording saved: ${file}`);
       }),
       listen<string>("recording-failed", (e) => show(`Recording failed: ${e.payload}`, true)),
+      listen<string>("replay-saved", (e) => {
+        const file = e.payload.split("\\").pop();
+        show(`Clip saved: ${file}`);
+      }),
+      listen<string>("replay-save-failed", (e) => show(`Saving clip failed: ${e.payload}`, true)),
+      listen<string>("replay-failed", (e) => show(`Replay buffer stopped: ${e.payload}`, true)),
     ];
     return () => stops.forEach((p) => p.then((stop) => stop()));
   });

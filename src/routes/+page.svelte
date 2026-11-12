@@ -2,7 +2,7 @@
   import Gallery from "$lib/Gallery.svelte";
   import Settings from "$lib/Settings.svelte";
   import Toast from "$lib/Toast.svelte";
-  import RecordButton from "$lib/RecordButton.svelte";
+  import ToggleButton from "$lib/ToggleButton.svelte";
 
   type Tab = "gallery" | "settings";
   let tab = $state<Tab>("gallery");
@@ -13,7 +13,27 @@
     <div class="logo">Orbit</div>
     <button class:active={tab === "gallery"} onclick={() => (tab = "gallery")}>Gallery</button>
     <button class:active={tab === "settings"} onclick={() => (tab = "settings")}>Settings</button>
-    <RecordButton />
+
+    <div class="controls">
+      <ToggleButton
+        labelOff="Replay buffer off"
+        labelOn="Replay buffer on"
+        hint="Alt+F10 saves"
+        statusCommand="is_replay_running"
+        toggleCommand="toggle_replay"
+        onEvents={["replay-started"]}
+        offEvents={["replay-stopped", "replay-failed"]}
+      />
+      <ToggleButton
+        labelOff="Record"
+        labelOn="Stop recording"
+        hint="Alt+F9"
+        statusCommand="is_recording"
+        toggleCommand="toggle_recording"
+        onEvents={["recording-started"]}
+        offEvents={["recording-saved", "recording-failed"]}
+      />
+    </div>
   </nav>
 
   <main class="content">
@@ -81,6 +101,13 @@
   .sidebar button.active {
     background: #1a1a1a;
     color: #fff;
+  }
+
+  .controls {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
   }
 
   .content {

@@ -45,4 +45,5 @@ Later: per-game filters, screenshot resize/crop, clip trimming, audio (game + mi
 ## Progress
 - [x] Step 1: app shell
 - [x] Step 2: screenshot hotkey (Alt+F12, FFmpeg ddagrab one frame → Videos\Orbit\Screenshots, ~0.5s; works in fullscreen game; CPU blip 0.1–0.2%)
-- [ ] Step 3: record / stop
+- [x] Step 3: record / stop (Alt+F9 or sidebar button, MKV → Videos\Orbit\Recordings, stop by sending "q" to FFmpeg stdin)
+- [ ] Step 4: replay buffer

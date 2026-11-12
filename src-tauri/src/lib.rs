@@ -1,18 +1,50 @@
 mod common;
 mod recorder;
+mod replay;
 mod screenshot;
+mod settings;
 
-use tauri::RunEvent;
+use tauri::{AppHandle, RunEvent};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 #[tauri::command]
-fn toggle_recording(app: tauri::AppHandle) {
+fn toggle_recording(app: AppHandle) {
     recorder::toggle(&app);
 }
 
 #[tauri::command]
-fn is_recording(app: tauri::AppHandle) -> bool {
+fn is_recording(app: AppHandle) -> bool {
     recorder::is_recording(&app)
+}
+
+#[tauri::command]
+fn toggle_replay(app: AppHandle) {
+    replay::toggle(&app);
+}
+
+#[tauri::command]
+fn is_replay_running(app: AppHandle) -> bool {
+    replay::is_running(&app)
+}
+
+#[tauri::command]
+fn save_replay(app: AppHandle) {
+    replay::save(app);
+}
+
+#[tauri::command]
+fn get_settings(app: AppHandle) -> settings::Settings {
+    settings::get(&app)
+}
+
+#[tauri::command]
+fn set_settings(app: AppHandle, new: settings::Settings) -> Result<(), String> {
+    let length_changed = new.replay_seconds != settings::get(&app).replay_seconds;
+    settings::set(&app, new)?;
+    if length_changed {
+        replay::restart(&app);
+    }
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -20,6 +52,7 @@ pub fn run() {
     // Default hotkeys (configurable in Settings later).
     let screenshot_key = Shortcut::new(Some(Modifiers::ALT), Code::F12);
     let record_key = Shortcut::new(Some(Modifiers::ALT), Code::F9);
+    let replay_key = Shortcut::new(Some(Modifiers::ALT), Code::F10);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -33,27 +66,47 @@ pub fn run() {
                         screenshot::take(app.clone());
                     } else if *shortcut == record_key {
                         recorder::toggle(app);
+                    } else if *shortcut == replay_key {
+                        replay::save(app.clone());
                     }
                 })
                 .build(),
         )
+        .manage(settings::SettingsState::default())
         .manage(recorder::Recorder::default())
-        .invoke_handler(tauri::generate_handler![toggle_recording, is_recording])
+        .manage(replay::Replay::default())
+        .invoke_handler(tauri::generate_handler![
+            toggle_recording,
+            is_recording,
+            toggle_replay,
+            is_replay_running,
+            save_replay,
+            get_settings,
+            set_settings
+        ])
         .setup(move |app| {
+            let handle = app.handle();
+            settings::load(handle);
+
             // If another app already uses a hotkey, don't crash; just report it.
-            for key in [screenshot_key, record_key] {
+            for key in [screenshot_key, record_key, replay_key] {
                 if let Err(e) = app.global_shortcut().register(key) {
                     eprintln!("Could not register hotkey {key}: {e}");
                 }
+            }
+
+            if settings::get(handle).replay_autostart {
+                replay::start(handle);
             }
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
-            // Closing Orbit while recording: finish the file instead of leaving FFmpeg running.
+            // Closing Orbit: finish files instead of leaving FFmpeg running.
             if let RunEvent::Exit = event {
                 recorder::stop(app);
+                replay::stop(app);
             }
         });
 }
