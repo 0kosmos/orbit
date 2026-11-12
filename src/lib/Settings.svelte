@@ -3,6 +3,7 @@
   import { listen } from "@tauri-apps/api/event";
   import { hotkeyFromEvent, hotkeyLabel } from "$lib/hotkey";
   import Segmented from "$lib/Segmented.svelte";
+  import { applyUi } from "$lib/ui.svelte";
 
   // Must match the Settings struct in src-tauri/src/settings.rs
   type Settings = {
@@ -22,6 +23,9 @@
     draw_mouse: boolean;
     audio_bitrate: number;
     screenshot_format: string;
+    theme: string;
+    animations: boolean;
+    blur: boolean;
   };
   type HotkeyField = "hotkey_screenshot" | "hotkey_record" | "hotkey_replay";
   // Must match DeviceList in src-tauri/src/audio.rs
@@ -41,6 +45,11 @@
     { value: "quality", label: "Quality" },
   ];
   const audioOptions = [128, 160, 192, 256].map((v) => ({ value: v, label: `${v} kbps` }));
+  const themeOptions = [
+    { value: "black", label: "Black" },
+    { value: "grey", label: "Dark grey" },
+    { value: "light", label: "Light" },
+  ];
   const formatOptions = [
     { value: "png", label: "PNG" },
     { value: "jpg", label: "JPG" },
@@ -84,6 +93,12 @@
   invoke<DeviceList>("list_audio_devices", { outputs: false }).then((d) => (mics = d));
 
   // Save right away whenever something changes.
+  // Theme / animations / blur: show the change right away, then save.
+  function saveLook() {
+    if (settings) applyUi(settings);
+    save();
+  }
+
   async function save() {
     try {
       await invoke("set_settings", { new: settings });
@@ -206,34 +221,36 @@
 </script>
 
 {#snippet devicePicker(kind: Kind, list: DeviceList)}
-  <div class="row indent">
-    {#if kind === "mic"}
-      <select bind:value={settings!.mic_device} onchange={() => deviceChanged(kind)}>
-        <option value={null}>Windows default ({list.default_name ?? "none"})</option>
-        {#each list.devices as d}
-          <option value={d.id}>{d.name}</option>
-        {/each}
-      </select>
-    {:else}
-      <select bind:value={settings!.system_device} onchange={() => deviceChanged(kind)}>
-        <option value={null}>Windows default ({list.default_name ?? "none"})</option>
-        {#each list.devices as d}
-          <option value={d.id}>{d.name}</option>
-        {/each}
-      </select>
+  <div class="sub">
+    <div class="device">
+      {#if kind === "mic"}
+        <select class="select" bind:value={settings!.mic_device} onchange={() => deviceChanged(kind)}>
+          <option value={null}>Windows default ({list.default_name ?? "none"})</option>
+          {#each list.devices as d}
+            <option value={d.id}>{d.name}</option>
+          {/each}
+        </select>
+      {:else}
+        <select class="select" bind:value={settings!.system_device} onchange={() => deviceChanged(kind)}>
+          <option value={null}>Windows default ({list.default_name ?? "none"})</option>
+          {#each list.devices as d}
+            <option value={d.id}>{d.name}</option>
+          {/each}
+        </select>
+      {/if}
+      <button class="btn" class:testing={testing === kind} onclick={() => toggleTest(kind)}>
+        {testing === kind ? "Stop" : "Test"}
+      </button>
+    </div>
+    {#if testing === kind}
+      <div class="meter"><div class="fill" style:width="{barPercent}%"></div></div>
+      <p class="desc">
+        {kind === "mic"
+          ? "Talk into your mic: the bar should move."
+          : "Play something (a video, a game): the bar should move. If it doesn't, try another device."}
+      </p>
     {/if}
-    <button class="test" class:on={testing === kind} onclick={() => toggleTest(kind)}>
-      {testing === kind ? "Stop" : "Test"}
-    </button>
   </div>
-  {#if testing === kind}
-    <div class="meter indent"><div class="fill" style:width="{barPercent}%"></div></div>
-    <p class="note indent">
-      {kind === "mic"
-        ? "Talk into your mic: the bar should move."
-        : "Play something (a video, a game): the bar should move. If it doesn't, try another device."}
-    </p>
-  {/if}
 {/snippet}
 
 <svelte:window onkeydown={onKeydown} />
@@ -241,18 +258,45 @@
 <h1>Settings</h1>
 
 {#if settings}
-  <section>
+  <!-- Appearance -->
+  <section class="card">
+    <h2>Appearance</h2>
+
+    <div class="row">
+      <div class="label"><span>Theme</span></div>
+      <Segmented options={themeOptions} bind:value={settings.theme} onchange={saveLook} />
+    </div>
+
+    <label class="row">
+      <div class="label">
+        <span>Animations</span>
+        <span class="desc">Short, smooth motion when you click or open things. Off = everything instant.</span>
+      </div>
+      <input type="checkbox" class="switch" bind:checked={settings.animations} onchange={saveLook} />
+    </label>
+
+    <label class="row">
+      <div class="label">
+        <span>Blur &amp; transparency</span>
+        <span class="desc">Frosted glass behind the viewer, notifications and filter bar.</span>
+      </div>
+      <input type="checkbox" class="switch" bind:checked={settings.blur} onchange={saveLook} />
+    </label>
+  </section>
+
+  <!-- Hotkeys -->
+  <section class="card">
     <h2>Hotkeys</h2>
 
     {#each hotkeyRows as row}
-      <div class="row hotkey-row">
-        <span>{row.label}</span>
+      <div class="row">
+        <div class="label"><span>{row.label}</span></div>
         <button
           class="hotkey"
           class:capturing={capturing === row.field}
           onclick={() => (capturing === row.field ? endCapture() : startCapture(row.field))}
         >
-          {capturing === row.field ? "Press keys… (Esc to cancel)" : hotkeyLabel(settings[row.field])}
+          {capturing === row.field ? "Press keys… (Esc cancels)" : hotkeyLabel(settings[row.field])}
         </button>
       </div>
     {/each}
@@ -260,51 +304,53 @@
     {#if hotkeyError}
       <p class="error">{hotkeyError}</p>
     {/if}
-    <button class="link" onclick={resetHotkeys}>Reset to defaults</button>
+    <button class="btn ghost small" onclick={resetHotkeys}>Reset to defaults</button>
   </section>
 
-  <section>
+  <!-- Video -->
+  <section class="card">
     <h2>Video</h2>
 
-    <div class="row setting">
-      <span>Frames per second</span>
+    <div class="row">
+      <div class="label">
+        <span>Frames per second</span>
+        <span class="desc">60 is smooth and light. Higher needs more GPU and disk.</span>
+      </div>
       <Segmented options={fpsOptions} bind:value={settings.video_fps} onchange={save} />
     </div>
-    <p class="note">
-      60 is smooth and light. Higher needs more GPU and disk, and only helps on a
-      high-refresh monitor.
-    </p>
 
-    <div class="row setting">
-      <span>Quality</span>
+    <div class="row">
+      <div class="label">
+        <span>Quality</span>
+        <span class="desc">Higher = bigger files. "High" is a good balance.</span>
+      </div>
       <Segmented options={qualityOptions} bind:value={settings.video_quality} onchange={save} />
     </div>
-    <p class="note">Higher quality = bigger files. "High" is a good balance.</p>
 
-    <div class="row setting">
-      <span>Encoder speed</span>
+    <div class="row">
+      <div class="label">
+        <span>Encoder speed</span>
+        <span class="desc">"Fastest" is lightest on your GPU (best for in-game FPS).</span>
+      </div>
       <Segmented options={presetOptions} bind:value={settings.encoder_preset} onchange={save} />
     </div>
-    <p class="note">
-      "Fastest" puts the least load on your GPU (best for FPS in games), "Quality" makes
-      slightly better video for the same file size.
-    </p>
 
     <label class="row">
-      <input type="checkbox" bind:checked={settings.draw_mouse} onchange={save} />
-      <span>Show the mouse cursor in recordings and screenshots</span>
+      <div class="label"><span>Show mouse cursor</span></div>
+      <input type="checkbox" class="switch" bind:checked={settings.draw_mouse} onchange={save} />
     </label>
   </section>
 
-  <section>
+  <!-- Replay buffer -->
+  <section class="card">
     <h2>Replay buffer</h2>
 
-    <div class="row setting">
-      <span>Save the last</span>
-      <strong>{lengthLabel(replayLengths[replayIndex])}</strong>
+    <div class="row">
+      <div class="label"><span>Save the last</span></div>
+      <strong class="value">{lengthLabel(replayLengths[replayIndex])}</strong>
     </div>
     <input
-      class="slider"
+      class="range"
       type="range"
       min="0"
       max={replayLengths.length - 1}
@@ -313,74 +359,80 @@
       oninput={() => (settings!.replay_seconds = replayLengths[replayIndex])}
       onchange={save}
     />
-    <p class="note">
-      Longer = more temporary disk space (roughly {Math.max(
-        1,
-        Math.round((replayLengths[replayIndex] / 60) * mbPerMinute),
-      )} MB), same CPU and GPU.
+    <p class="desc">
+      Uses roughly {Math.max(1, Math.round((replayLengths[replayIndex] / 60) * mbPerMinute))} MB of
+      temporary disk space. Same CPU and GPU at any length.
     </p>
 
     <label class="row">
-      <input type="checkbox" bind:checked={settings.replay_autostart} onchange={save} />
-      <span>Turn on the replay buffer when Orbit opens</span>
+      <div class="label"><span>Turn on when Orbit opens</span></div>
+      <input type="checkbox" class="switch" bind:checked={settings.replay_autostart} onchange={save} />
     </label>
   </section>
 
-  <section>
+  <!-- Audio -->
+  <section class="card">
     <h2>Audio</h2>
 
     <label class="row">
-      <input type="checkbox" bind:checked={settings.system_audio} onchange={save} />
-      <span>Record game / PC sound from</span>
+      <div class="label"><span>Record game / PC sound</span></div>
+      <input type="checkbox" class="switch" bind:checked={settings.system_audio} onchange={save} />
     </label>
     {#if settings.system_audio}
       {@render devicePicker("game", outputs)}
     {/if}
 
     <label class="row">
-      <input type="checkbox" bind:checked={settings.mic_enabled} onchange={save} />
-      <span>Record microphone (as a separate track)</span>
+      <div class="label">
+        <span>Record microphone</span>
+        <span class="desc">Mixed into the main track, plus its own track for editing.</span>
+      </div>
+      <input type="checkbox" class="switch" bind:checked={settings.mic_enabled} onchange={save} />
     </label>
     {#if settings.mic_enabled}
       {@render devicePicker("mic", mics)}
     {/if}
 
     {#if testError}
-      <p class="error indent">Test failed: {testError}</p>
+      <p class="error">Test failed: {testError}</p>
     {/if}
 
-    <div class="row setting">
-      <span>Sound quality</span>
+    <div class="row">
+      <div class="label"><span>Sound quality</span></div>
       <Segmented options={audioOptions} bind:value={settings.audio_bitrate} onchange={save} />
     </div>
   </section>
 
-  <section>
+  <!-- Screenshots -->
+  <section class="card">
     <h2>Screenshots</h2>
 
-    <div class="row setting">
-      <span>Format</span>
+    <div class="row">
+      <div class="label">
+        <span>Format</span>
+        <span class="desc">PNG is lossless. JPG is usually much smaller for games.</span>
+      </div>
       <Segmented options={formatOptions} bind:value={settings.screenshot_format} onchange={save} />
     </div>
-    <p class="note">
-      PNG is lossless. JPG is usually several times smaller for games (but not for plain
-      desktop screenshots).
-    </p>
   </section>
 
-  <p class="note">
-    Changes apply to the next recording. A running replay buffer restarts by itself (its
-    saved time starts over).
-  </p>
-
-  <section>
+  <!-- Feedback -->
+  <section class="card">
     <h2>Feedback</h2>
 
     <label class="row">
-      <input type="checkbox" bind:checked={settings.sounds} onchange={save} />
-      <span>Play a short sound when saving, starting a recording, or on errors</span>
+      <div class="label">
+        <span>Sounds</span>
+        <span class="desc">A short beep when saving, starting a recording, or on errors.</span>
+      </div>
+      <input type="checkbox" class="switch" bind:checked={settings.sounds} onchange={save} />
     </label>
   </section>
+
+  <p class="footnote">
+    Recording changes apply to the next recording. A running replay buffer restarts by itself
+    (its saved time starts over).
+  </p>
 {/if}
 
 {#if error}
@@ -390,123 +442,120 @@
 <style>
   h1 {
     margin: 0 0 20px;
-    font-size: 20px;
+    font-size: 24px;
     font-weight: 600;
+    letter-spacing: -0.3px;
+  }
+  .card {
+    max-width: 640px;
+    margin-bottom: 16px;
+    padding: 18px 20px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
   }
   h2 {
-    margin: 0 0 12px;
-    font-size: 13px;
+    margin: 0 0 10px;
+    font-size: 12px;
     font-weight: 600;
-    color: #888;
+    color: var(--text-faint);
     text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-  section {
-    max-width: 520px;
-    margin-bottom: 28px;
+    letter-spacing: 0.8px;
   }
   .row {
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin-bottom: 12px;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    padding: 10px 0;
+    border-top: 1px solid var(--border);
   }
-  select {
-    min-width: 0;
-    flex: 1;
-    max-width: 360px;
-    padding: 5px 8px;
-    border: 1px solid #2a2a2a;
-    border-radius: 6px;
-    background: #111;
-    color: #e6e6e6;
-    font: inherit;
+  h2 + .row {
+    border-top: none;
   }
-  input[type="checkbox"] {
-    accent-color: #e53935;
-  }
-  .indent {
-    margin-left: 24px;
-  }
-  .test {
-    padding: 5px 12px;
-    border: 1px solid #2a2a2a;
-    border-radius: 6px;
-    background: transparent;
-    color: #ccc;
-    font: inherit;
+  label.row {
     cursor: pointer;
   }
-  .test:hover {
-    color: #fff;
-    background: #141414;
+  .label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1 1 220px;
   }
-  .test.on {
-    border-color: #6b2222;
-    color: #fff;
+  .desc {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-faint);
+  }
+  .card > .desc {
+    margin: -4px 0 10px;
+  }
+  .value {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .small {
+    margin: 4px 0 10px;
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+
+  /* Device picker under an audio switch */
+  .sub {
+    padding: 0 0 12px;
+  }
+  .device {
+    display: flex;
+    gap: 8px;
+  }
+  .device .select {
+    flex: 1;
+  }
+  .btn.testing {
+    border-color: var(--accent);
+    color: var(--text);
   }
   .meter {
     height: 6px;
-    max-width: 360px;
-    margin-bottom: 8px;
-    border-radius: 3px;
-    background: #1a1a1a;
+    margin: 10px 0 6px;
+    border-radius: 999px;
+    background: var(--surface-2);
     overflow: hidden;
   }
   .fill {
     height: 100%;
-    background: #3fbf5f;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--ok), #a3e635 70%, #facc15);
   }
-  .note {
-    margin: -6px 0 12px;
-    font-size: 12px;
-    color: #666;
-  }
-  .meter + .note {
-    margin-top: 0;
-  }
-  .error {
-    color: #ff9a9a;
-  }
-  .setting {
-    justify-content: space-between;
-    flex-wrap: wrap;
-  }
-  .slider {
-    width: 100%;
-    margin: 0 0 12px;
-    accent-color: #e53935;
-  }
-  .hotkey-row {
-    justify-content: space-between;
-  }
+
+  /* Hotkey buttons */
   .hotkey {
-    min-width: 170px;
-    padding: 5px 12px;
-    border: 1px solid #2a2a2a;
-    border-radius: 6px;
-    background: #111;
-    color: #e6e6e6;
-    font: inherit;
+    min-width: 180px;
+    padding: 6px 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    color: var(--text);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
     cursor: pointer;
+    transition:
+      border-color var(--fast) var(--ease),
+      background var(--fast) var(--ease);
   }
   .hotkey:hover {
-    border-color: #444;
+    background: var(--surface-hover);
   }
   .hotkey.capturing {
-    border-color: #e53935;
-    color: #fff;
+    border-color: var(--accent);
+    background: var(--accent-soft);
   }
-  .link {
-    padding: 0;
-    border: none;
-    background: none;
-    color: #888;
-    font: inherit;
+
+  .footnote {
+    max-width: 640px;
     font-size: 12px;
-    cursor: pointer;
-  }
-  .link:hover {
-    color: #fff;
+    color: var(--text-faint);
   }
 </style>

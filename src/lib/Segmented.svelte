@@ -15,11 +15,20 @@
     value = v;
     onchange?.();
   }
+
+  // The highlight slides to the chosen button (by index, all buttons equal width).
+  let index = $derived(Math.max(0, options.findIndex((o) => o.value === value)));
 </script>
 
-<div class="segmented" role="radiogroup">
+<div class="segmented" role="radiogroup" style:--count={options.length} style:--index={index}>
+  <span class="highlight" aria-hidden="true"></span>
   {#each options as o}
-    <button role="radio" aria-checked={o.value === value} class:on={o.value === value} onclick={() => pick(o.value)}>
+    <button
+      role="radio"
+      aria-checked={o.value === value}
+      class:on={o.value === value}
+      onclick={() => pick(o.value)}
+    >
       {o.label}
     </button>
   {/each}
@@ -27,27 +36,39 @@
 
 <style>
   .segmented {
-    display: inline-flex;
-    padding: 2px;
-    border: 1px solid #222;
-    border-radius: 8px;
-    background: #0d0d0d;
+    position: relative;
+    display: inline-grid;
+    grid-template-columns: repeat(var(--count), 1fr);
+    padding: 3px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+  }
+  .highlight {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    left: 3px;
+    width: calc((100% - 6px) / var(--count));
+    border-radius: 5px;
+    background: var(--surface-hover);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+    transform: translateX(calc(100% * var(--index)));
+    transition: transform var(--normal) var(--ease);
   }
   button {
-    padding: 4px 12px;
+    position: relative;
+    padding: 5px 12px;
     border: none;
-    border-radius: 6px;
     background: transparent;
-    color: #888;
-    font: inherit;
+    color: var(--text-muted);
     font-size: 13px;
+    white-space: nowrap;
     cursor: pointer;
+    transition: color var(--fast) var(--ease);
   }
-  button:hover {
-    color: #fff;
-  }
+  button:hover,
   button.on {
-    background: #222;
-    color: #fff;
+    color: var(--text);
   }
 </style>

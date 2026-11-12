@@ -223,6 +223,16 @@ pub fn open(app: &AppHandle, path: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Move several files to the Recycle Bin. Returns the ones that were deleted;
+/// files that couldn't be (e.g. open in a player) are skipped, the rest still go.
+pub fn delete_many(app: &AppHandle, paths: &[String]) -> Vec<String> {
+    paths
+        .iter()
+        .filter(|path| delete(app, path).is_ok())
+        .cloned()
+        .collect()
+}
+
 /// Open Explorer with this file selected.
 pub fn show_in_folder(app: &AppHandle, path: &str) -> Result<(), String> {
     let file = checked(app, path)?;

@@ -9,12 +9,15 @@ mod screenshot;
 mod settings;
 mod sound;
 
-use tauri::{AppHandle, Emitter, RunEvent};
+use tauri::window::Color;
+use tauri::{AppHandle, Emitter, Manager, RunEvent, Theme};
 use tauri_plugin_global_shortcut::ShortcutState;
 
+/// Commands that start/stop FFmpeg run on a worker thread, never on the main
+/// thread that draws the window (so the window can never freeze while they work).
 #[tauri::command]
-fn toggle_recording(app: AppHandle) {
-    recorder::toggle(&app);
+async fn toggle_recording(app: AppHandle) {
+    let _ = tauri::async_runtime::spawn_blocking(move || recorder::toggle(&app)).await;
 }
 
 #[tauri::command]
@@ -23,8 +26,8 @@ fn is_recording(app: AppHandle) -> bool {
 }
 
 #[tauri::command]
-fn toggle_replay(app: AppHandle) {
-    replay::toggle(&app);
+async fn toggle_replay(app: AppHandle) {
+    let _ = tauri::async_runtime::spawn_blocking(move || replay::toggle(&app)).await;
 }
 
 #[tauri::command]
@@ -55,13 +58,27 @@ fn set_settings(app: AppHandle, new: settings::Settings) -> Result<(), String> {
     if hotkeys_changed {
         hotkeys::apply(&app, &new)?;
     }
+    let theme_changed = new.theme != old.theme;
     settings::set(&app, new)?;
+    if theme_changed {
+        apply_window_theme(&app);
+    }
     if capture_changed {
         replay::restart(&app);
     }
     // Tell the window (e.g. the hotkey hints in the sidebar).
     let _ = app.emit("settings-changed", settings::get(&app));
     Ok(())
+}
+
+/// Light or dark Windows title bar (and window background), to match the theme.
+fn apply_window_theme(app: &AppHandle) {
+    let light = settings::get(app).theme == "light";
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_theme(Some(if light { Theme::Light } else { Theme::Dark }));
+        let bg = if light { (244, 244, 245) } else { (0, 0, 0) };
+        let _ = window.set_background_color(Some(Color(bg.0, bg.1, bg.2, 255)));
+    }
 }
 
 /// Hotkeys are off while choosing a new one in Settings.
@@ -75,8 +92,10 @@ fn pause_hotkeys(app: AppHandle, paused: bool) {
 }
 
 #[tauri::command]
-fn list_media(app: AppHandle) -> Result<Vec<media::MediaItem>, String> {
-    media::list(&app)
+async fn list_media(app: AppHandle) -> Result<Vec<media::MediaItem>, String> {
+    tauri::async_runtime::spawn_blocking(move || media::list(&app))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// `async` + `spawn_blocking`: runs FFmpeg on a worker thread so the window never freezes.
@@ -124,6 +143,14 @@ fn open_media(app: AppHandle, path: String) -> Result<(), String> {
     media::open(&app, &path)
 }
 
+/// Bulk delete (to the Recycle Bin). Returns the paths that were deleted.
+#[tauri::command]
+async fn delete_media_many(app: AppHandle, paths: Vec<String>) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || media::delete_many(&app, &paths))
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn show_in_folder(app: AppHandle, path: String) -> Result<(), String> {
     media::show_in_folder(&app, &path)
@@ -146,7 +173,11 @@ pub fn run() {
                     }
                     match hotkeys::action_for(app, shortcut) {
                         Some(hotkeys::Action::Screenshot) => screenshot::take(app.clone()),
-                        Some(hotkeys::Action::Record) => recorder::toggle(app),
+                        Some(hotkeys::Action::Record) => {
+                            // Off the main thread, so the window keeps drawing.
+                            let app = app.clone();
+                            std::thread::spawn(move || recorder::toggle(&app));
+                        }
                         Some(hotkeys::Action::SaveReplay) => replay::save(app.clone()),
                         None => {}
                     }
@@ -169,6 +200,7 @@ pub fn run() {
             list_media,
             preview,
             delete_media,
+            delete_media_many,
             open_media,
             open_media_folder,
             show_in_folder,
@@ -181,9 +213,11 @@ pub fn run() {
             let handle = app.handle();
             settings::load(handle);
             hotkeys::load(handle, &settings::get(handle));
+            apply_window_theme(handle);
 
             if settings::get(handle).replay_autostart {
-                replay::start(handle);
+                let handle = handle.clone();
+                std::thread::spawn(move || replay::start(&handle));
             }
             Ok(())
         })

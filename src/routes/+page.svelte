@@ -3,33 +3,89 @@
   import Settings from "$lib/Settings.svelte";
   import Toast from "$lib/Toast.svelte";
   import ToggleButton from "$lib/ToggleButton.svelte";
-
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
+  import { fly } from "svelte/transition";
   import { hotkeyLabel } from "$lib/hotkey";
+  import { applyUi, ms } from "$lib/ui.svelte";
 
   type Tab = "gallery" | "settings";
   let tab = $state<Tab>("gallery");
 
-  // Hotkey hints on the sidebar buttons; updated when Settings changes them.
-  type Keys = { hotkey_record: string; hotkey_replay: string };
-  let keys = $state<Keys>({ hotkey_record: "Alt+F9", hotkey_replay: "Alt+F10" });
+  // The settings the shell needs: hotkey hints on the sidebar buttons and the look.
+  // Loaded once, then updated only when Settings changes something (no polling).
+  type ShellSettings = {
+    hotkey_record: string;
+    hotkey_replay: string;
+    theme: string;
+    animations: boolean;
+    blur: boolean;
+  };
+  let keys = $state({ hotkey_record: "Alt+F9", hotkey_replay: "Alt+F10" });
+  function use(s: ShellSettings) {
+    keys = s;
+    applyUi(s);
+  }
   $effect(() => {
-    invoke<Keys>("get_settings").then((s) => (keys = s));
-    const stop = listen<Keys>("settings-changed", (e) => (keys = e.payload));
+    invoke<ShellSettings>("get_settings").then(use);
+    const stop = listen<ShellSettings>("settings-changed", (e) => use(e.payload));
     return () => stop.then((s) => s());
   });
+
+  const tabs: { id: Tab; label: string; icon: string }[] = [
+    {
+      id: "gallery",
+      label: "Gallery",
+      // 4 squares
+      icon: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
+    },
+    {
+      id: "settings",
+      label: "Settings",
+      // sliders
+      icon: "M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6",
+    },
+  ];
 </script>
 
 <div class="app">
   <nav class="sidebar">
-    <div class="logo">Orbit</div>
-    <button class:active={tab === "gallery"} onclick={() => (tab = "gallery")}>Gallery</button>
-    <button class:active={tab === "settings"} onclick={() => (tab = "settings")}>Settings</button>
+    <div class="logo">
+      <!-- Orbit logo: a planet with a ring -->
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <circle cx="12" cy="12" r="5" fill="var(--accent)" />
+        <ellipse
+          cx="12"
+          cy="12"
+          rx="10"
+          ry="4"
+          fill="none"
+          stroke="var(--text-muted)"
+          stroke-width="1.5"
+          transform="rotate(-20 12 12)"
+        />
+      </svg>
+      <span>Orbit</span>
+    </div>
+
+    {#each tabs as t}
+      <button class="nav" class:active={tab === t.id} onclick={() => (tab = t.id)}>
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <path
+            d={t.icon}
+            fill={t.id === "gallery" ? "currentColor" : "none"}
+            stroke="currentColor"
+            stroke-width={t.id === "gallery" ? 0 : 2}
+            stroke-linecap="round"
+          />
+        </svg>
+        {t.label}
+      </button>
+    {/each}
 
     <div class="controls">
       <ToggleButton
-        labelOff="Replay buffer off"
+        labelOff="Replay buffer"
         labelOn="Replay buffer on"
         hint="{hotkeyLabel(keys.hotkey_replay)} saves"
         statusCommand="is_replay_running"
@@ -50,70 +106,71 @@
   </nav>
 
   <main class="content">
-    {#if tab === "gallery"}
-      <Gallery />
-    {:else}
-      <Settings />
-    {/if}
+    <!-- {#key} remakes the page on tab change, so it can slide in. -->
+    {#key tab}
+      <div class="page" in:fly={{ y: 8, duration: ms(220) }}>
+        {#if tab === "gallery"}
+          <Gallery />
+        {:else}
+          <Settings />
+        {/if}
+      </div>
+    {/key}
   </main>
 </div>
 
 <Toast />
 
 <style>
-  :global(html, body) {
-    margin: 0;
-    height: 100%;
-    background: #000;
-    color: #e6e6e6;
-    font-family: "Segoe UI", system-ui, sans-serif;
-    font-size: 14px;
-    user-select: none;
-  }
-
   .app {
     display: flex;
     height: 100vh;
   }
 
   .sidebar {
-    width: 180px;
+    width: 200px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
     gap: 2px;
-    padding: 16px 10px;
-    background: #0a0a0a;
-    border-right: 1px solid #1a1a1a;
+    padding: 18px 12px;
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border);
   }
 
   .logo {
-    font-size: 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 8px 20px;
+    font-size: 17px;
     font-weight: 600;
-    letter-spacing: 0.5px;
-    padding: 0 10px 16px;
-    color: #fff;
+    letter-spacing: 0.3px;
   }
 
-  .sidebar button {
-    text-align: left;
-    padding: 8px 10px;
+  .nav {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 10px;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     background: transparent;
-    color: #999;
-    font: inherit;
+    color: var(--text-muted);
+    text-align: left;
     cursor: pointer;
+    transition:
+      background var(--fast) var(--ease),
+      color var(--fast) var(--ease);
   }
-
-  .sidebar button:hover {
-    background: #141414;
-    color: #fff;
+  .nav:hover {
+    background: var(--surface-hover);
+    color: var(--text);
   }
-
-  .sidebar button.active {
-    background: #1a1a1a;
-    color: #fff;
+  .nav.active {
+    background: var(--surface-2);
+    color: var(--text);
+    box-shadow: inset 2px 0 0 var(--accent);
   }
 
   .controls {
@@ -125,7 +182,10 @@
 
   .content {
     flex: 1;
+    min-width: 0;
     overflow-y: auto;
-    padding: 24px 32px;
+  }
+  .page {
+    padding: 28px 36px 40px;
   }
 </style>

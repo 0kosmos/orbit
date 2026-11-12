@@ -34,6 +34,12 @@ pub struct Settings {
     pub audio_bitrate: u32,
     /// "png" (lossless, bigger) or "jpg" (smaller).
     pub screenshot_format: String,
+    /// Look: "black" | "grey" | "light".
+    pub theme: String,
+    /// Short animations when you click or open things (off = everything instant).
+    pub animations: bool,
+    /// Blur / see-through effects behind the viewer, notifications and filter bar.
+    pub blur: bool,
     /// Hotkeys, like "Alt+F12" or "Ctrl+Shift+KeyS".
     pub hotkey_screenshot: String,
     pub hotkey_record: String,
@@ -56,6 +62,9 @@ impl Default for Settings {
             draw_mouse: true,
             audio_bitrate: 160,
             screenshot_format: "png".into(),
+            theme: "black".into(),
+            animations: true,
+            blur: true,
             hotkey_screenshot: "Alt+F12".into(),
             hotkey_record: "Alt+F9".into(),
             hotkey_replay: "Alt+F10".into(),

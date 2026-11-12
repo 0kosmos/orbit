@@ -1,15 +1,20 @@
 <script lang="ts">
   import { listen } from "@tauri-apps/api/event";
+  import { fly } from "svelte/transition";
+  import { ms } from "$lib/ui.svelte";
 
   // A small message in the corner that hides itself after a few seconds.
   // It only reacts to events sent from Rust, so there's no polling.
   let message = $state("");
   let isError = $state(false);
+  // Changes with every message, so a new message slides in again.
+  let id = $state(0);
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   function show(text: string, error = false) {
     message = text;
     isError = error;
+    id++;
     clearTimeout(timer);
     timer = setTimeout(() => (message = ""), error ? 6000 : 2500);
   }
@@ -38,25 +43,55 @@
 </script>
 
 {#if message}
-  <div class="toast" class:error={isError}>{message}</div>
+  {#key id}
+    <div
+      class="toast"
+      class:error={isError}
+      role="status"
+      in:fly={{ y: 16, duration: ms(260) }}
+      out:fly={{ y: 16, duration: ms(180) }}
+    >
+      <span class="dot"></span>
+      <span class="text">{message}</span>
+    </div>
+  {/key}
 {/if}
 
 <style>
   .toast {
     position: fixed;
-    right: 16px;
-    bottom: 16px;
-    max-width: 420px;
-    padding: 10px 14px;
-    background: #141414;
-    border: 1px solid #2a2a2a;
-    border-radius: 8px;
-    color: #e6e6e6;
+    right: 20px;
+    bottom: 20px;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: 440px;
+    padding: 11px 16px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    /* Solid on purpose: a blurred, moving notification can make WebView2 stop redrawing. */
+    background: var(--surface-2);
+    box-shadow: var(--shadow);
+    color: var(--text);
     font-size: 13px;
     user-select: text;
   }
-  .toast.error {
-    border-color: #6b2222;
-    color: #ff9a9a;
+  .dot {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ok);
+  }
+  .toast.error .dot {
+    background: var(--rec);
+  }
+  .toast.error .text {
+    color: #f87171;
+  }
+  .text {
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 </style>

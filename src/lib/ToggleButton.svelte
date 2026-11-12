@@ -36,43 +36,66 @@
 
 <button class="toggle" class:on onclick={() => invoke(toggleCommand)}>
   <span class="dot"></span>
-  {on ? labelOn : labelOff}
-  <span class="hint">{hint}</span>
+  <span class="text">
+    <span class="label">{on ? labelOn : labelOff}</span>
+    <span class="hint">{hint}</span>
+  </span>
 </button>
 
 <style>
   .toggle {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 10px;
-    border: 1px solid #222;
-    border-radius: 6px;
-    background: transparent;
-    color: #ccc;
-    font: inherit;
+    gap: 10px;
+    padding: 9px 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    text-align: left;
     cursor: pointer;
+    transition:
+      background var(--fast) var(--ease),
+      border-color var(--normal) var(--ease),
+      box-shadow var(--normal) var(--ease),
+      transform var(--fast) var(--ease);
   }
   .toggle:hover {
-    background: #141414;
-    color: #fff;
+    background: var(--surface-hover);
   }
-  .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #555;
+  .toggle:active {
+    transform: scale(0.98);
   }
-  .toggle.on {
-    border-color: #6b2222;
-    color: #fff;
+  .text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
   }
-  .toggle.on .dot {
-    background: #e53935;
+  .label {
+    font-size: 13px;
+    font-weight: 500;
   }
   .hint {
-    margin-left: auto;
     font-size: 11px;
-    color: #666;
+    color: var(--text-faint);
+  }
+  /* No blinking/pulsing on purpose: a constant animation would keep the GPU busy. */
+  .dot {
+    flex-shrink: 0;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--text-faint);
+    transition:
+      background var(--normal) var(--ease),
+      box-shadow var(--normal) var(--ease);
+  }
+  .toggle.on {
+    border-color: color-mix(in srgb, var(--rec) 55%, transparent);
+    background: var(--rec-soft);
+  }
+  .toggle.on .dot {
+    background: var(--rec);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--rec) 25%, transparent);
   }
 </style>
