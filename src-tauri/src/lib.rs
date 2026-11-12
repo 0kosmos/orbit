@@ -151,6 +151,27 @@ async fn delete_media_many(app: AppHandle, paths: Vec<String>) -> Result<Vec<Str
         .map_err(|e| e.to_string())
 }
 
+/// Crop / resize a screenshot (on a worker thread). Tells the gallery and the
+/// notification about the new image with the usual "screenshot-saved" event.
+#[tauri::command]
+async fn edit_image(
+    app: AppHandle,
+    path: String,
+    crop: Option<media::Crop>,
+    width: Option<u32>,
+    format: String,
+    replace: bool,
+) -> Result<String, String> {
+    let saved = tauri::async_runtime::spawn_blocking({
+        let app = app.clone();
+        move || media::edit_image(&app, &path, crop, width, &format, replace)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let _ = app.emit("screenshot-saved", saved.clone());
+    Ok(saved)
+}
+
 #[tauri::command]
 fn show_in_folder(app: AppHandle, path: String) -> Result<(), String> {
     media::show_in_folder(&app, &path)
@@ -201,6 +222,7 @@ pub fn run() {
             preview,
             delete_media,
             delete_media_many,
+            edit_image,
             open_media,
             open_media_folder,
             show_in_folder,

@@ -79,7 +79,10 @@
       const path = queue.shift()!;
       busy++;
       invoke<Preview>("preview", { path })
-        .then((p) => (previews[path] = { src: convertFileSrc(p.thumb), duration: p.duration }))
+        .then(
+          (p) =>
+            (previews[path] = { src: `${convertFileSrc(p.thumb)}?v=${Date.now()}`, duration: p.duration }),
+        )
         .catch(() => (previews[path] = { src: "", duration: null }))
         .finally(() => {
           busy--;
@@ -225,6 +228,16 @@
   // --- In-app viewer ---
   // Path of the file open in the viewer (null = closed).
   let viewing = $state<string | null>(null);
+
+  // After cropping / resizing: reload the list, make a fresh thumbnail for the
+  // saved image (it may have replaced the original), and show it in the viewer.
+  async function showEdited(newPath: string) {
+    await refresh();
+    delete previews[newPath];
+    queue.push(newPath);
+    pump();
+    viewing = newPath;
+  }
 
   // Deleting from the viewer: show the next file (or the previous one at the end).
   async function removeFromViewer(item: Item) {
@@ -437,6 +450,7 @@
     }
     onclose={() => (viewing = null)}
     ondelete={removeFromViewer}
+    onedited={showEdited}
   />
 {/if}
 

@@ -3,6 +3,7 @@
   import { fade, scale } from "svelte/transition";
   import { ms } from "$lib/ui.svelte";
   import Player from "$lib/Player.svelte";
+  import ImageEditor from "$lib/ImageEditor.svelte";
 
   // Same shape as the gallery's items.
   type Item = {
@@ -19,22 +20,30 @@
     index = $bindable(),
     onclose,
     ondelete,
+    onedited,
   }: {
     items: Item[];
     index: number;
     onclose: () => void;
     ondelete: (item: Item) => void;
+    // A screenshot was cropped / resized: the path of the saved image.
+    onedited: (newPath: string) => void;
   } = $props();
+
+  // Screenshot editor (crop / resize) open?
+  let editing = $state(false);
 
   let item = $derived(items[index]);
   let isVideo = $derived(item?.kind !== "screenshot");
-  let src = $derived(item ? convertFileSrc(item.path) : "");
+  // "?v=" + time changed: a replaced (edited) image is never shown from the old cache.
+  let src = $derived(item ? `${convertFileSrc(item.path)}?v=${item.modified}` : "");
   let failed = $state(false);
 
   // A new file: forget the "can't play" message from the previous one.
   $effect(() => {
     void src;
     failed = false;
+    editing = false;
   });
 
   // Remember the volume between videos (only in this browser view; ok if unavailable).
@@ -62,6 +71,7 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
+    if (editing) return; // the editor handles its own keys (Esc = cancel editing)
     if (e.key === "Escape") onclose();
     else if (e.key === "ArrowLeft") prev();
     else if (e.key === "ArrowRight") next();
@@ -105,6 +115,14 @@
           <span class="muted">{formatDate(item.modified)} · {index + 1} / {items.length}</span>
         </div>
         <div class="actions">
+          {#if !isVideo && !editing}
+            <button class="btn" onclick={() => (editing = true)}>
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                <path d="M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+              Crop / resize
+            </button>
+          {/if}
           <button class="btn" onclick={() => invoke("show_in_folder", { path: item.path })}>
             Show in folder
           </button>
@@ -135,20 +153,30 @@
               <Player {src} bind:volume bind:speed onerror={() => (failed = true)} />
             </div>
           {/key}
+        {:else if editing}
+          <ImageEditor
+            {src}
+            path={item.path}
+            onclose={() => (editing = false)}
+            onsaved={(p) => {
+              editing = false;
+              onedited(p);
+            }}
+          />
         {:else}
           {#key src}
             <img {src} alt={item.name} decoding="async" in:fade={{ duration: ms(160) }} />
           {/key}
         {/if}
 
-        {#if index > 0}
+        {#if index > 0 && !editing}
           <button class="nav left" title="Previous (←)" aria-label="Previous" onclick={prev}>
             <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
               <path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
             </svg>
           </button>
         {/if}
-        {#if index < items.length - 1}
+        {#if index < items.length - 1 && !editing}
           <button class="nav right" title="Next (→)" aria-label="Next" onclick={next}>
             <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
               <path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />

@@ -1,5 +1,5 @@
 use crate::common;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 use tauri::{AppHandle, Manager};
@@ -207,11 +207,7 @@ pub fn delete(app: &AppHandle, path: &str) -> Result<(), String> {
         return Err(format!("Could not delete the file (error {result}). Is it open somewhere?"));
     }
 
-    if let (Ok(dir), Some(name)) = (thumbs_dir(app), file.file_name()) {
-        let name = name.to_string_lossy();
-        let _ = std::fs::remove_file(dir.join(format!("{name}.jpg")));
-        let _ = std::fs::remove_file(dir.join(format!("{name}.len")));
-    }
+    forget_preview(app, &file);
     Ok(())
 }
 
@@ -231,6 +227,94 @@ pub fn delete_many(app: &AppHandle, paths: &[String]) -> Vec<String> {
         .filter(|path| delete(app, path).is_ok())
         .cloned()
         .collect()
+}
+
+/// A crop rectangle in image pixels.
+#[derive(Deserialize)]
+pub struct Crop {
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+}
+
+/// Crop and/or resize a screenshot with FFmpeg.
+/// - `crop`: the part to keep (None = whole image)
+/// - `width`: final width in pixels, height follows (None = keep size)
+/// - `format`: "png" or "jpg"
+/// - `replace`: overwrite the original instead of saving a copy
+/// Returns the path of the saved image.
+pub fn edit_image(
+    app: &AppHandle,
+    path: &str,
+    crop: Option<Crop>,
+    width: Option<u32>,
+    format: &str,
+    replace: bool,
+) -> Result<String, String> {
+    let file = checked(app, path)?;
+    let dir = file.parent().ok_or("Bad path")?.to_path_buf();
+    let ext = if format == "jpg" { "jpg" } else { "png" };
+
+    // The copy keeps the game in its name, with the current time.
+    let game = game_from_name(&file);
+    let game = if game == "Other" { "Desktop".to_string() } else { game };
+    let new_name = format!(
+        "{game}_{}.{ext}",
+        chrono::Local::now().format("%Y-%m-%d_%H-%M-%S-%3f")
+    );
+    let out = if replace {
+        file.with_extension(ext)
+    } else {
+        dir.join(new_name)
+    };
+    // Write to a temp file first; only replace/rename when FFmpeg succeeded.
+    let tmp = dir.join(format!("orbit-edit-tmp.{ext}"));
+
+    let mut filters = Vec::new();
+    if let Some(c) = crop {
+        filters.push(format!("crop={}:{}:{}:{}", c.w.max(1), c.h.max(1), c.x, c.y));
+    }
+    if let Some(w) = width {
+        filters.push(format!("scale={}:-1:flags=lanczos", w.max(1)));
+    }
+    let mut cmd = common::ffmpeg();
+    cmd.args(["-y", "-i"]).arg(&file);
+    if !filters.is_empty() {
+        cmd.arg("-vf").arg(filters.join(","));
+    }
+    if ext == "jpg" {
+        // Full color detail (yuvj444p) and very high quality.
+        cmd.args(["-pix_fmt", "yuvj444p", "-q:v", "2"]);
+    }
+    let output = cmd
+        .args(["-frames:v", "1"])
+        .arg(&tmp)
+        .output()
+        .map_err(|e| format!("Could not start FFmpeg: {e}"))?;
+    if !output.status.success() {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    if replace {
+        // Drop the old preview, and the old file if the format changed.
+        forget_preview(app, &file);
+        if out != file {
+            let _ = std::fs::remove_file(&file);
+        }
+    }
+    std::fs::rename(&tmp, &out).map_err(|e| e.to_string())?;
+    Ok(out.to_string_lossy().into_owned())
+}
+
+/// Remove a file's cached thumbnail and length.
+fn forget_preview(app: &AppHandle, file: &Path) {
+    if let (Ok(dir), Some(name)) = (thumbs_dir(app), file.file_name()) {
+        let name = name.to_string_lossy();
+        let _ = std::fs::remove_file(dir.join(format!("{name}.jpg")));
+        let _ = std::fs::remove_file(dir.join(format!("{name}.len")));
+    }
 }
 
 /// Open Explorer with this file selected.
