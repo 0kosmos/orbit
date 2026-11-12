@@ -47,4 +47,5 @@ Later: per-game filters, screenshot resize/crop, clip trimming, audio (game + mi
 - [x] Step 2: screenshot hotkey (Alt+F12, FFmpeg ddagrab one frame → Videos\Orbit\Screenshots, ~0.5s; works in fullscreen game; CPU blip 0.1–0.2%)
 - [x] Step 3: record / stop (Alt+F9 or sidebar button, MKV → Videos\Orbit\Recordings, stop by sending "q" to FFmpeg stdin)
 - [x] Step 4: replay buffer (sidebar toggle, Alt+F10 saves MP4 → Videos\Orbit\Clips; 5s .ts segments with -segment_wrap in app cache dir; settings.json for replay length + autostart)
-- [ ] Step 5: simple gallery
+- [x] Step 5: simple gallery (lists Videos\Orbit\{Screenshots,Clips,Recordings}; lazy 320px JPG thumbs via FFmpeg cached in app cache\thumbs, max 3 at once; click opens in default Windows app; asset protocol scoped to $APPCACHE/thumbs)
+- [ ] Step 6: save sound feedback

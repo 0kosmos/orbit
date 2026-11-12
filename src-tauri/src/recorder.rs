@@ -1,4 +1,5 @@
 use crate::common::{self, Background};
+use crate::sound::{self, Sound};
 use tauri::{AppHandle, Emitter, Manager};
 
 #[derive(Default)]
@@ -13,6 +14,7 @@ pub fn toggle(app: &AppHandle) {
     if is_recording(app) {
         stop(app);
     } else if let Err(err) = start(app) {
+        sound::play(app, Sound::Error);
         let _ = app.emit("recording-failed", err);
     }
 }
@@ -41,10 +43,17 @@ fn start(app: &AppHandle) -> Result<(), String> {
     let path = path.to_string_lossy().into_owned();
     app.state::<Recorder>().0.start(cmd, move |result| {
         let _ = match result {
-            Ok(()) => done_app.emit("recording-saved", path),
-            Err(err) => done_app.emit("recording-failed", err),
+            Ok(()) => {
+                sound::play(&done_app, Sound::Saved);
+                done_app.emit("recording-saved", path)
+            }
+            Err(err) => {
+                sound::play(&done_app, Sound::Error);
+                done_app.emit("recording-failed", err)
+            }
         };
     })?;
+    sound::play(app, Sound::Start);
     let _ = app.emit("recording-started", ());
     Ok(())
 }

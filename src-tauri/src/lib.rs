@@ -4,6 +4,7 @@ mod recorder;
 mod replay;
 mod screenshot;
 mod settings;
+mod sound;
 
 use tauri::{AppHandle, RunEvent};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};

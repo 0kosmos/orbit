@@ -1,4 +1,5 @@
 use crate::common;
+use crate::sound::{self, Sound};
 use tauri::{AppHandle, Emitter};
 
 /// Takes a screenshot on a background thread so the app never freezes.
@@ -6,9 +7,11 @@ use tauri::{AppHandle, Emitter};
 pub fn take(app: AppHandle) {
     std::thread::spawn(move || match capture(&app) {
         Ok(path) => {
+            sound::play(&app, Sound::Saved);
             let _ = app.emit("screenshot-saved", path);
         }
         Err(err) => {
+            sound::play(&app, Sound::Error);
             let _ = app.emit("screenshot-failed", err);
         }
     });

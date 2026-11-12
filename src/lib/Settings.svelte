@@ -5,6 +5,7 @@
   type Settings = {
     replay_seconds: number;
     replay_autostart: boolean;
+    sounds: boolean;
   };
 
   const lengths = [
@@ -51,6 +52,15 @@
       <span>Turn on the replay buffer when Orbit opens</span>
     </label>
   </section>
+
+  <section>
+    <h2>Feedback</h2>
+
+    <label class="row">
+      <input type="checkbox" bind:checked={settings.sounds} onchange={save} />
+      <span>Play a short sound when saving, starting a recording, or on errors</span>
+    </label>
+  </section>
 {/if}
 
 {#if error}
@@ -73,6 +83,7 @@
   }
   section {
     max-width: 480px;
+    margin-bottom: 28px;
   }
   .row {
     display: flex;

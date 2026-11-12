@@ -12,6 +12,8 @@ pub struct Settings {
     pub replay_seconds: u32,
     /// Turn the replay buffer on automatically when Orbit opens.
     pub replay_autostart: bool,
+    /// Play a short sound when something is saved, recording starts, or on errors.
+    pub sounds: bool,
 }
 
 impl Default for Settings {
@@ -19,6 +21,7 @@ impl Default for Settings {
         Self {
             replay_seconds: 120,
             replay_autostart: false,
+            sounds: true,
         }
     }
 }

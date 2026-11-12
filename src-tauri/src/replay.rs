@@ -1,5 +1,6 @@
 use crate::common::{self, Background};
 use crate::settings;
+use crate::sound::{self, Sound};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -48,6 +49,7 @@ pub fn restart(app: &AppHandle) {
 
 pub fn start(app: &AppHandle) {
     if let Err(err) = try_start(app) {
+        sound::play(app, Sound::Error);
         let _ = app.emit("replay-failed", err);
     }
 }
@@ -103,7 +105,10 @@ fn try_start(app: &AppHandle) -> Result<(), String> {
         }
         let _ = match result {
             Ok(()) => done_app.emit("replay-stopped", ()),
-            Err(err) => done_app.emit("replay-failed", err),
+            Err(err) => {
+                sound::play(&done_app, Sound::Error);
+                done_app.emit("replay-failed", err)
+            }
         };
     })?;
     *state.dir.lock().unwrap() = Some(dir);
@@ -115,8 +120,14 @@ fn try_start(app: &AppHandle) -> Result<(), String> {
 pub fn save(app: AppHandle) {
     std::thread::spawn(move || {
         let _ = match try_save(&app) {
-            Ok(path) => app.emit("replay-saved", path),
-            Err(err) => app.emit("replay-save-failed", err),
+            Ok(path) => {
+                sound::play(&app, Sound::Saved);
+                app.emit("replay-saved", path)
+            }
+            Err(err) => {
+                sound::play(&app, Sound::Error);
+                app.emit("replay-save-failed", err)
+            }
         };
     });
 }
