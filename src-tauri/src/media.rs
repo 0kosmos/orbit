@@ -11,6 +11,8 @@ pub struct MediaItem {
     path: String,
     name: String,
     kind: &'static str,
+    /// The game it was taken in (from the file name), e.g. "Rocket League".
+    game: String,
     /// Last changed, in milliseconds since 1970 (JavaScript's Date understands this).
     modified: u64,
     size: u64,
@@ -38,8 +40,10 @@ pub fn list(app: &AppHandle) -> Result<Vec<MediaItem>, String> {
                 .ok()
                 .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                 .map_or(0, |d| d.as_millis() as u64);
+            let path = entry.path();
             items.push(MediaItem {
-                path: entry.path().to_string_lossy().into_owned(),
+                game: game_from_name(&path),
+                path: path.to_string_lossy().into_owned(),
                 name: entry.file_name().to_string_lossy().into_owned(),
                 kind,
                 modified,
@@ -49,6 +53,24 @@ pub fn list(app: &AppHandle) -> Result<Vec<MediaItem>, String> {
     }
     items.sort_by(|a, b| b.modified.cmp(&a.modified));
     Ok(items)
+}
+
+/// "Rocket League_2026-11-12_20-56-03-123.mp4" → "Rocket League".
+/// Files from before game detection ("Orbit_...") or renamed files → "Other".
+fn game_from_name(path: &Path) -> String {
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let chars: Vec<char> = stem.chars().collect();
+    let n = chars.len();
+    if n > common::TIMESTAMP_LEN + 1 && chars[n - common::TIMESTAMP_LEN - 1] == '_' {
+        let game: String = chars[..n - common::TIMESTAMP_LEN - 1].iter().collect();
+        if game != "Orbit" && !game.is_empty() {
+            return game;
+        }
+    }
+    "Other".into()
 }
 
 /// Only allow files inside Videos\Orbit, so the UI can't be used to open anything else.

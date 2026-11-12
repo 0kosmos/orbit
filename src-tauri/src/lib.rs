@@ -1,5 +1,6 @@
 mod audio;
 mod common;
+mod game;
 mod media;
 mod recorder;
 mod replay;

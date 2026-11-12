@@ -4,7 +4,14 @@
 
   // Must match MediaItem in src-tauri/src/media.rs
   type Kind = "screenshot" | "clip" | "recording";
-  type Item = { path: string; name: string; kind: Kind; modified: number; size: number };
+  type Item = {
+    path: string;
+    name: string;
+    kind: Kind;
+    game: string;
+    modified: number;
+    size: number;
+  };
 
   const filters: { value: Kind | "all"; label: string }[] = [
     { value: "all", label: "All" },
@@ -15,9 +22,21 @@
 
   let items = $state<Item[]>([]);
   let filter = $state<Kind | "all">("all");
+  let gameFilter = $state("all");
   // path -> thumbnail URL ("" if it couldn't be made)
   let thumbs = $state<Record<string, string>>({});
-  let shown = $derived(filter === "all" ? items : items.filter((i) => i.kind === filter));
+
+  // Every game that has something in the gallery, A–Z ("Other" last).
+  let games = $derived(
+    [...new Set(items.map((i) => i.game))].sort((a, b) =>
+      a === "Other" ? 1 : b === "Other" ? -1 : a.localeCompare(b),
+    ),
+  );
+  let shown = $derived(
+    items.filter(
+      (i) => (filter === "all" || i.kind === filter) && (gameFilter === "all" || i.game === gameFilter),
+    ),
+  );
 
   async function refresh() {
     items = await invoke<Item[]>("list_media");
@@ -103,6 +122,12 @@
   {#each filters as f}
     <button class:active={filter === f.value} onclick={() => (filter = f.value)}>{f.label}</button>
   {/each}
+  <select bind:value={gameFilter}>
+    <option value="all">All games</option>
+    {#each games as g}
+      <option value={g}>{g}</option>
+    {/each}
+  </select>
 </div>
 
 {#if shown.length === 0}
@@ -124,8 +149,8 @@
           <span class="badge">{kindLabel[item.kind]}</span>
         </div>
         <div class="meta">
-          <span>{formatDate(item.modified)}</span>
-          <span class="muted">{formatSize(item.size)}</span>
+          <span class="game">{item.game}</span>
+          <span class="muted">{formatDate(item.modified)} · {formatSize(item.size)}</span>
         </div>
       </button>
     {/each}
@@ -163,6 +188,8 @@
 
   .filters {
     display: flex;
+    flex-wrap: wrap;
+    align-items: center;
     gap: 6px;
     margin-bottom: 18px;
   }
@@ -224,8 +251,24 @@
   }
   .meta {
     display: flex;
-    justify-content: space-between;
+    flex-direction: column;
+    gap: 2px;
     padding: 8px 10px;
     font-size: 12px;
+  }
+  .game {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .filters select {
+    margin-left: auto;
+    max-width: 220px;
+    padding: 5px 8px;
+    border: 1px solid #222;
+    border-radius: 6px;
+    background: #111;
+    color: #e6e6e6;
+    font: inherit;
   }
 </style>

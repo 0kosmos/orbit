@@ -25,7 +25,7 @@ pub fn stop(app: &AppHandle) {
 }
 
 fn start(app: &AppHandle) -> Result<(), String> {
-    let path = common::orbit_dir(app, "Recordings")?.join(common::timestamp_name("mkv"));
+    let path = common::orbit_dir(app, "Recordings")?.join(common::media_name("mkv"));
 
     let pipes = common::start_audio(app)?;
 

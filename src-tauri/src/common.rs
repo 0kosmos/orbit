@@ -30,7 +30,7 @@ pub fn orbit_dir(app: &AppHandle, sub: &str) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// File name like Orbit_2026-11-12_20-56-03-123.png
+/// Name like Orbit_2026-11-12_20-56-03-123.ext (used for temp folders).
 pub fn timestamp_name(ext: &str) -> String {
     format!(
         "{}.{ext}",
@@ -181,4 +181,17 @@ impl Background {
         });
         Ok(())
     }
+}
+
+/// Length of the date/time part of our file names: 2026-11-12_20-56-03-123
+pub const TIMESTAMP_LEN: usize = 23;
+
+/// File name for a new screenshot / clip / recording, starting with the game that's
+/// in front, like "Rocket League_2026-11-12_20-56-03-123.mp4".
+pub fn media_name(ext: &str) -> String {
+    format!(
+        "{}_{}.{ext}",
+        crate::game::foreground_name(),
+        chrono::Local::now().format("%Y-%m-%d_%H-%M-%S-%3f")
+    )
 }

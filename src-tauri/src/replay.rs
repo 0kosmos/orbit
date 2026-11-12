@@ -181,7 +181,7 @@ fn try_save(app: &AppHandle) -> Result<String, String> {
     std::fs::write(&list_path, list).map_err(|e| e.to_string())?;
 
     // Join without re-encoding (-c copy): fast and no quality loss.
-    let out = common::orbit_dir(app, "Clips")?.join(common::timestamp_name("mp4"));
+    let out = common::orbit_dir(app, "Clips")?.join(common::media_name("mp4"));
     // "-map 0" keeps every track (video, game sound, mic), not just the first audio one.
     let mut cmd = common::ffmpeg();
     cmd.args(["-y", "-f", "concat", "-safe", "0", "-i"])

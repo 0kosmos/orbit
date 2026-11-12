@@ -18,7 +18,7 @@ pub fn take(app: AppHandle) {
 }
 
 fn capture(app: &AppHandle) -> Result<String, String> {
-    let path = common::orbit_dir(app, "Screenshots")?.join(common::timestamp_name("png"));
+    let path = common::orbit_dir(app, "Screenshots")?.join(common::media_name("png"));
 
     // Grab one frame with Windows Desktop Duplication (ddagrab), copy it from the GPU,
     // and save it as PNG. FFmpeg then exits, so there's no cost when idle.
