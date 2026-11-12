@@ -14,6 +14,8 @@ pub struct Settings {
     pub replay_autostart: bool,
     /// Play a short sound when something is saved, recording starts, or on errors.
     pub sounds: bool,
+    /// Record game / PC sound (what plays on the default speakers or headphones).
+    pub system_audio: bool,
 }
 
 impl Default for Settings {
@@ -22,6 +24,7 @@ impl Default for Settings {
             replay_seconds: 120,
             replay_autostart: false,
             sounds: true,
+            system_audio: true,
         }
     }
 }

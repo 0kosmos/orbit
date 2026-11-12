@@ -1,3 +1,4 @@
+use crate::audio;
 use crate::common::{self, Background};
 use crate::settings;
 use crate::sound::{self, Sound};
@@ -73,18 +74,16 @@ fn try_start(app: &AppHandle) -> Result<(), String> {
     // Keep a few more pieces than needed, so the ones we join are never being overwritten.
     let pieces = settings::get(app).replay_seconds / SEGMENT_SECONDS + 3;
 
+    let audio_pipe = match settings::get(app).system_audio {
+        true => Some(audio::start_loopback()?),
+        false => None,
+    };
+
     let mut cmd = common::ffmpeg();
+    cmd.arg("-y");
+    // (The keyframe every second lets pieces be cut cleanly every 5 seconds.)
+    common::add_capture_args(&mut cmd, audio_pipe.as_deref());
     cmd.args([
-        "-y",
-        "-filter_complex",
-        "ddagrab=framerate=60",
-        "-c:v",
-        "h264_nvenc",
-        "-cq",
-        "23",
-        // A keyframe every second, so pieces can be cut cleanly every 5 seconds.
-        "-g",
-        "60",
         "-f",
         "segment",
         "-segment_time",
@@ -97,7 +96,11 @@ fn try_start(app: &AppHandle) -> Result<(), String> {
     .arg(dir.join("buf_%03d.ts"));
 
     let done_app = app.clone();
-    state.ffmpeg.start(cmd, move |result| {
+    let pipe = audio_pipe.clone();
+    let started = state.ffmpeg.start(cmd, move |result| {
+        if let Some(pipe) = &pipe {
+            audio::release(pipe);
+        }
         let state = done_app.state::<Replay>();
         if state.restart.swap(false, Ordering::Relaxed) {
             start(&done_app);
@@ -110,7 +113,13 @@ fn try_start(app: &AppHandle) -> Result<(), String> {
                 done_app.emit("replay-failed", err)
             }
         };
-    })?;
+    });
+    if let Err(err) = started {
+        if let Some(pipe) = &audio_pipe {
+            audio::release(pipe);
+        }
+        return Err(err);
+    }
     *state.dir.lock().unwrap() = Some(dir);
     let _ = app.emit("replay-started", ());
     Ok(())

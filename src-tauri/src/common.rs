@@ -37,6 +37,35 @@ pub fn timestamp_name(ext: &str) -> String {
     )
 }
 
+/// Inputs, encoders and stream mapping shared by recording and the replay buffer.
+/// `audio_pipe`: where to read PC sound from (see audio.rs), or None for video only.
+pub fn add_capture_args(cmd: &mut Command, audio_pipe: Option<&str>) {
+    if let Some(pipe) = audio_pipe {
+        cmd.args(["-thread_queue_size", "1024", "-f", "f32le", "-ar"])
+            .arg(crate::audio::SAMPLE_RATE.to_string())
+            .arg("-ac")
+            .arg(crate::audio::CHANNELS.to_string())
+            .arg("-i")
+            .arg(pipe);
+    }
+    // Video: Desktop Duplication + NVIDIA GPU encoder, a keyframe every second.
+    cmd.args([
+        "-filter_complex",
+        "ddagrab=framerate=60[v]",
+        "-map",
+        "[v]",
+        "-c:v",
+        "h264_nvenc",
+        "-cq",
+        "23",
+        "-g",
+        "60",
+    ]);
+    if audio_pipe.is_some() {
+        cmd.args(["-map", "0:a", "-c:a", "aac", "-b:a", "160k"]);
+    }
+}
+
 /// One FFmpeg process running in the background (a recording or the replay buffer).
 /// We keep FFmpeg's input (stdin) so we can send it "q", which makes FFmpeg
 /// finish its file properly and quit.

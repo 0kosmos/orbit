@@ -1,4 +1,6 @@
+use crate::audio;
 use crate::common::{self, Background};
+use crate::settings;
 use crate::sound::{self, Sound};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -26,22 +28,23 @@ pub fn stop(app: &AppHandle) {
 fn start(app: &AppHandle) -> Result<(), String> {
     let path = common::orbit_dir(app, "Recordings")?.join(common::timestamp_name("mkv"));
 
-    // Same capture you tested: Desktop Duplication + NVIDIA GPU encoder.
+    let audio_pipe = match settings::get(app).system_audio {
+        true => Some(audio::start_loopback()?),
+        false => None,
+    };
+
     let mut cmd = common::ffmpeg();
-    cmd.args([
-        "-y",
-        "-filter_complex",
-        "ddagrab=framerate=60",
-        "-c:v",
-        "h264_nvenc",
-        "-cq",
-        "23",
-    ])
-    .arg(&path);
+    cmd.arg("-y");
+    common::add_capture_args(&mut cmd, audio_pipe.as_deref());
+    cmd.arg(&path);
 
     let done_app = app.clone();
     let path = path.to_string_lossy().into_owned();
-    app.state::<Recorder>().0.start(cmd, move |result| {
+    let pipe = audio_pipe.clone();
+    let started = app.state::<Recorder>().0.start(cmd, move |result| {
+        if let Some(pipe) = &pipe {
+            audio::release(pipe);
+        }
         let _ = match result {
             Ok(()) => {
                 sound::play(&done_app, Sound::Saved);
@@ -52,7 +55,13 @@ fn start(app: &AppHandle) -> Result<(), String> {
                 done_app.emit("recording-failed", err)
             }
         };
-    })?;
+    });
+    if let Err(err) = started {
+        if let Some(pipe) = &audio_pipe {
+            audio::release(pipe);
+        }
+        return Err(err);
+    }
     sound::play(app, Sound::Start);
     let _ = app.emit("recording-started", ());
     Ok(())

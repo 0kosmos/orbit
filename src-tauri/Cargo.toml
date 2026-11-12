@@ -24,7 +24,15 @@ tauri-plugin-global-shortcut = "2"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-windows-sys = { version = "0.61", features = ["Win32_Media_Audio"] }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+] }
+wasapi = "0.27"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
