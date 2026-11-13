@@ -4,6 +4,8 @@
   import { hotkeyFromEvent, hotkeyLabel } from "$lib/hotkey";
   import Segmented from "$lib/Segmented.svelte";
   import { applyUi, ms } from "$lib/ui.svelte";
+  import { update, checkForUpdates, openGithub, REPO_URL } from "$lib/updates.svelte";
+  import { getVersion } from "@tauri-apps/api/app";
   import { fly } from "svelte/transition";
 
   // Must match the Settings struct in src-tauri/src/settings.rs
@@ -87,7 +89,7 @@
 
   let settings = $state<Settings | null>(null);
   // Settings are split into categories; only the chosen one is shown.
-  type Category = "general" | "capture" | "audio" | "replay" | "hotkeys" | "storage";
+  type Category = "general" | "capture" | "audio" | "replay" | "hotkeys" | "storage" | "about";
   let cat = $state<Category>("general");
   const categories: { id: Category; label: string; icon: string }[] = [
     { id: "general", label: "General", icon: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" },
@@ -96,6 +98,7 @@
     { id: "replay", label: "Replay buffer", icon: "M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 8v4l3 2" },
     { id: "hotkeys", label: "Hotkeys", icon: "M3 7h18v10H3zM7 11h.01M11 11h.01M15 11h.01M8 14h8" },
     { id: "storage", label: "Storage & system", icon: "M4 6h16M4 6v12h16V6M9 10h6" },
+    { id: "about", label: "About & updates", icon: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v5M12 8h.01" },
   ];
 
   // Rough disk use of the buffer per minute at each quality (game footage, 60 fps).
@@ -161,6 +164,24 @@
     } catch (e) {
       settings!.overlay_enabled = !settings!.overlay_enabled;
       error = String(e);
+    }
+  }
+
+  // --- About: version, updates, uninstall ---
+  let appVersion = $state("");
+  let installed = $state(true);
+  let confirmUninstall = $state(false);
+  let deleteData = $state(false);
+  let uninstallError = $state("");
+  getVersion().then((v) => (appVersion = v));
+  invoke<boolean>("is_installed").then((v) => (installed = v));
+
+  async function doUninstall() {
+    try {
+      // Orbit closes itself and the Windows uninstaller opens.
+      await invoke("uninstall", { deleteData });
+    } catch (e) {
+      uninstallError = String(e);
     }
   }
 
@@ -614,6 +635,89 @@
           </p>
         </section>
       {/if}
+      {#if cat === "about"}
+        <!-- About & updates -->
+        <section class="card">
+          <h2>About Orbit</h2>
+          <div class="row">
+            <div class="label">
+              <span>Version {update.current || appVersion}</span>
+              <span class="desc">
+                {#if update.status === "checking"}
+                  Checking GitHub…
+                {:else if update.status === "latest"}
+                  You have the newest version ✓
+                {:else if update.status === "available"}
+                  Version {update.latest} is available.
+                {:else if update.status === "error"}
+                  {update.message}
+                {:else}
+                  Updates are published on GitHub. Orbit only checks when you click.
+                {/if}
+              </span>
+            </div>
+            {#if update.status === "available"}
+              <button class="btn primary" onclick={() => openGithub(update.url)}>
+                Download v{update.latest}
+              </button>
+            {:else}
+              <button class="btn" disabled={update.status === "checking"} onclick={checkForUpdates}>
+                {update.status === "checking" ? "Checking…" : "Check for updates"}
+              </button>
+            {/if}
+          </div>
+          <div class="row">
+            <div class="label">
+              <span>Orbit on GitHub</span>
+              <span class="desc">Releases, changes and source code.</span>
+            </div>
+            <button class="btn ghost" onclick={() => openGithub(REPO_URL)}>Open GitHub</button>
+          </div>
+        </section>
+
+        <!-- Uninstall -->
+        <section class="card">
+          <h2>Uninstall</h2>
+          {#if !confirmUninstall}
+            <div class="row">
+              <div class="label">
+                <span>Uninstall Orbit</span>
+                <span class="desc">
+                  Removes the app. Your screenshots, clips and recordings are always kept.
+                </span>
+              </div>
+              <button class="btn danger" onclick={() => ((confirmUninstall = true), (uninstallError = ""))}>
+                Uninstall…
+              </button>
+            </div>
+          {:else}
+            <div class="uninstall-box">
+              <p>
+                Orbit will stop recording, remove "Start with Windows", close, and open the
+                Windows uninstaller.
+              </p>
+              <label class="check-row">
+                <input type="checkbox" class="switch" bind:checked={deleteData} />
+                <span>
+                  Also delete Orbit's settings, thumbnails and temporary files
+                  <span class="desc">(your screenshots, clips and recordings are kept)</span>
+                </span>
+              </label>
+              {#if uninstallError}<p class="error">{uninstallError}</p>{/if}
+              <div class="uninstall-buttons">
+                <button class="btn ghost" onclick={() => (confirmUninstall = false)}>Cancel</button>
+                <button class="btn danger-solid" onclick={doUninstall}>Uninstall Orbit</button>
+              </div>
+            </div>
+          {/if}
+          {#if !installed}
+            <p class="desc dev-note">
+              This is the development version (not installed), so uninstalling isn't
+              possible here.
+            </p>
+          {/if}
+        </section>
+      {/if}
     </div>
     {/key}
     {/if}
@@ -799,6 +903,47 @@
   }
   .folder-note {
     padding-bottom: 10px;
+  }
+  .btn.primary {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--accent-contrast);
+  }
+  .btn.danger-solid {
+    border-color: var(--danger);
+    background: var(--danger);
+    color: #fff;
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    pointer-events: none;
+  }
+  .uninstall-box {
+    padding: 4px 0 14px;
+  }
+  .uninstall-box p {
+    margin: 0 0 12px;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .check-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 14px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .check-row .desc {
+    display: block;
+  }
+  .uninstall-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+  .dev-note {
+    padding-bottom: 12px;
   }
   .footnote {
     max-width: 640px;

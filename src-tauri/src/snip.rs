@@ -65,7 +65,7 @@ fn try_start(app: &AppHandle) -> Result<(), String> {
         .output()
         .map_err(|e| format!("Could not start FFmpeg: {e}"))?;
     if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        return Err(common::friendly_error(&String::from_utf8_lossy(&output.stderr)));
     }
     *app.state::<SnipState>().0.lock().unwrap() = Some((frozen, game));
 
@@ -161,7 +161,7 @@ pub fn save(app: &AppHandle, crop: Option<Crop>, keep: bool) -> Result<String, S
         .output()
         .map_err(|e| format!("Could not start FFmpeg: {e}"))?;
     if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        return Err(common::friendly_error(&String::from_utf8_lossy(&output.stderr)));
     }
 
     // Copy to the clipboard (paste it straight into Discord etc.).

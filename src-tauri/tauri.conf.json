@@ -32,7 +32,22 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
+    "publisher": "0kosmos",
+    "homepage": "https://github.com/0kosmos/orbit",
+    "copyright": "Copyright (c) 2026 0kosmos",
+    "category": "Video",
+    "shortDescription": "Lightweight game recorder: screenshots, clips and replays",
+    "longDescription": "Orbit is a super lightweight game recording app for Windows: screenshots, region snips, recordings and an instant replay buffer, with almost no performance cost.",
+    "resources": {
+      "ffmpeg/ffmpeg.exe": "ffmpeg/ffmpeg.exe",
+      "ffmpeg/LICENSE.txt": "ffmpeg/LICENSE.txt"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

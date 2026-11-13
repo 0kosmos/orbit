@@ -1,7 +1,7 @@
 //! PC usage for the status bar: CPU %, GPU %, RAM used / total.
 //!
-//! Measured every 2 seconds, but ONLY while Orbit's window is open and not minimized,
-//! and the status bar is switched on. With the window closed (tray) or minimized,
+//! Measured every 5 seconds, but ONLY while Orbit's window (or the overlay) is open, in
+//! focus and not minimized, and the status bar is switched on. With the window closed (tray) or minimized,
 //! nothing is measured. Uses Windows' own counters (the ones Task Manager uses).
 
 use crate::settings;
@@ -51,8 +51,10 @@ pub fn ensure_running(app: &AppHandle) {
         let mut cpu = CpuMeter::new();
         let mut gpu = GpuMeter::new();
         let mut first = true;
+        // What the window shows right now (last values sent), and the minute.
+        let mut last_sent: Option<(Stats, String)> = None;
         loop {
-            std::thread::sleep(Duration::from_millis(if first { 700 } else { 2000 }));
+            std::thread::sleep(Duration::from_millis(if first { 700 } else { 5000 }));
             first = false;
 
             // Stop completely when no window is open or the status bar was switched off.
@@ -60,25 +62,48 @@ pub fn ensure_running(app: &AppHandle) {
             if windows.is_empty() || !settings::get(&app).status_bar {
                 break;
             }
-            // Minimized (e.g. while gaming): don't measure, just wait.
-            let visible = windows
-                .values()
-                .any(|w| w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(true));
-            if !visible {
+            // Only while you're looking at Orbit: a window (or the overlay) must be visible,
+            // not minimized AND in focus. Orbit open behind a game or on another monitor
+            // costs nothing (each update makes WebView2 redraw, ~0.1 s CPU). The very first
+            // sample is always shown, so the bar isn't empty.
+            let looked_at = windows.values().any(|w| {
+                w.is_visible().unwrap_or(false)
+                    && !w.is_minimized().unwrap_or(true)
+                    && w.is_focused().unwrap_or(false)
+            });
+            if !looked_at && last_sent.is_some() {
                 continue;
             }
 
             let (ram_used, ram_total) = ram();
-            let _ = app.emit(
-                "stats",
-                Stats {
-                    cpu: cpu.sample(),
-                    gpu: gpu.as_mut().and_then(|g| g.sample()),
-                    ram_used,
-                    ram_total,
-                    orbit_ram: orbit_memory(),
-                },
-            );
+            let stats = Stats {
+                cpu: cpu.sample(),
+                gpu: gpu.as_mut().and_then(|g| g.sample()),
+                ram_used,
+                ram_total,
+                orbit_ram: orbit_memory(),
+            };
+            // Every update makes the window redraw, which costs far more than measuring
+            // (measured: ~0.4 % CPU vs ~0.04 %). So only send NOTICEABLE changes: CPU / GPU
+            // by 3 % or more, RAM by 0.1 GB, Orbit by 2 MB, or a new minute for the clock.
+            let minute = chrono::Local::now().format("%H:%M").to_string();
+            let noticeable = match &last_sent {
+                None => true,
+                Some((old, old_minute)) => {
+                    (stats.cpu - old.cpu).abs() >= 3.0
+                        || match (stats.gpu, old.gpu) {
+                            (Some(a), Some(b)) => (a - b).abs() >= 3.0,
+                            (a, b) => a.is_some() != b.is_some(),
+                        }
+                        || stats.ram_used.abs_diff(old.ram_used) >= 100_000_000
+                        || stats.orbit_ram.abs_diff(old.orbit_ram) >= 2_000_000
+                        || minute != *old_minute
+                }
+            };
+            if noticeable {
+                let _ = app.emit("stats", stats.clone());
+                last_sent = Some((stats, minute));
+            }
         }
         RUNNING.store(false, Ordering::SeqCst);
     });

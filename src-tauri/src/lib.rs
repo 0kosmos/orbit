@@ -1,3 +1,4 @@
+mod about;
 mod audio;
 mod common;
 mod game;
@@ -316,6 +317,23 @@ async fn trim_video(
     Ok(saved)
 }
 
+/// About: open Orbit's GitHub page (e.g. a release with an update).
+#[tauri::command]
+fn open_github(app: AppHandle, url: String) -> Result<(), String> {
+    about::open_github(&app, &url)
+}
+
+/// About: installed with the installer? (Only then can it be uninstalled.)
+#[tauri::command]
+fn is_installed() -> bool {
+    about::is_installed()
+}
+
+#[tauri::command]
+fn uninstall(app: AppHandle, delete_data: bool) -> Result<(), String> {
+    about::uninstall(&app, delete_data)
+}
+
 #[tauri::command]
 fn show_in_folder(app: AppHandle, path: String) -> Result<(), String> {
     media::show_in_folder(&app, &path)
@@ -403,11 +421,15 @@ pub fn run() {
             snip_ready,
             overlay_ready,
             overlay_open_settings,
-            take_pending_tab
+            take_pending_tab,
+            open_github,
+            is_installed,
+            uninstall
         ])
         .setup(|app| {
             let handle = app.handle();
             settings::load(handle);
+            common::init_ffmpeg(handle);
             hotkeys::load(handle, &settings::get(handle));
             common::allow_in_window(handle);
             tray::create(handle)?;

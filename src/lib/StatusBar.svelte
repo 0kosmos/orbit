@@ -1,10 +1,12 @@
 <script lang="ts">
   import { getVersion } from "@tauri-apps/api/app";
   import { listen } from "@tauri-apps/api/event";
+  import { update, checkForUpdates, openGithub } from "$lib/updates.svelte";
 
   // Bottom bar: Orbit version · CPU · GPU · RAM · time.
-  // Rust sends "stats" every 2 s while the window is open (nothing when it's closed);
-  // the clock is updated with each of those, so there's no extra timer.
+  // Rust sends "stats" (checked every 3 s, sent only when a shown number changes) while
+  // the window is open, nothing when it's closed. The clock updates with each of those.
+  // The bars move with a GPU-only transform and no animation, so an update is cheap.
   type Stats = {
     cpu: number;
     gpu: number | null;
@@ -43,7 +45,7 @@
   <span class="item" title="{label} usage of the whole PC">
     <span class="label">{label}</span>
     <span class="bar">
-      <span class="fill {level(pct ?? 0)}" style:width="{pct ?? 0}%"></span>
+      <span class="fill {level(pct ?? 0)}" style:transform="scaleX({Math.min(1, Math.max(0, (pct ?? 0) / 100))})"></span>
     </span>
     <span class="value">{text}</span>
   </span>
@@ -51,6 +53,32 @@
 
 <footer class="status" class:compact>
   <span class="item brand">Orbit <span class="faint">v{version}</span></span>
+  <!-- Check for updates (only when clicked) -->
+  {#if update.status === "available"}
+    <button class="upd available" title="Open the download page" onclick={() => openGithub(update.url)}>
+      Update v{update.latest}
+    </button>
+  {:else}
+    <button
+      class="upd"
+      title={update.status === "error" ? update.message : "Check for updates"}
+      disabled={update.status === "checking"}
+      onclick={checkForUpdates}
+    >
+      {#if update.status === "checking"}
+        Checking…
+      {:else if update.status === "latest"}
+        Up to date ✓
+      {:else if update.status === "error"}
+        Can't check ↻
+      {:else}
+        <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">
+          <path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        Check for updates
+      {/if}
+    </button>
+  {/if}
   <span class="spacer"></span>
   {#if stats}
     <!-- Orbit's own memory (app + window + FFmpeg) -->
@@ -74,7 +102,11 @@
 </footer>
 
 <style>
+  /* Its own drawing layer + containment: an update redraws only this bar, never the
+     rest of the window. */
   .status {
+    contain: layout paint style;
+    will-change: transform;
     display: flex;
     align-items: center;
     gap: 18px;
@@ -121,9 +153,10 @@
   }
   .fill {
     display: block;
+    width: 100%;
     height: 100%;
     border-radius: 999px;
-    transition: width var(--normal) var(--ease);
+    transform-origin: left;
   }
   .fill.low {
     background: var(--text-muted);
@@ -140,6 +173,32 @@
   }
   .time {
     color: var(--text);
+  }
+  .upd {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: -8px;
+    padding: 2px 7px;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--text-faint);
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .upd:hover {
+    border-color: var(--border-strong);
+    color: var(--text);
+  }
+  .upd:disabled {
+    cursor: default;
+  }
+  .upd.available {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--accent-contrast);
+    font-weight: 600;
   }
   .divider {
     width: 1px;

@@ -194,7 +194,7 @@ fn try_save(app: &AppHandle) -> Result<String, String> {
         .output()
         .map_err(|e| format!("Could not start FFmpeg: {e}"))?;
     if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        return Err(common::friendly_error(&String::from_utf8_lossy(&output.stderr)));
     }
     Ok(out.to_string_lossy().into_owned())
 }

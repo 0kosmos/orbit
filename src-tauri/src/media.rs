@@ -154,7 +154,7 @@ pub fn preview(app: &AppHandle, path: &str) -> Result<Preview, String> {
         .map_err(|e| format!("Could not start FFmpeg: {e}"))?;
     if !output.status.success() {
         let _ = std::fs::remove_file(&tmp);
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        return Err(common::friendly_error(&String::from_utf8_lossy(&output.stderr)));
     }
     std::fs::rename(&tmp, &thumb).map_err(|e| e.to_string())?;
 
@@ -301,7 +301,7 @@ pub fn edit_image(
         .map_err(|e| format!("Could not start FFmpeg: {e}"))?;
     if !output.status.success() {
         let _ = std::fs::remove_file(&tmp);
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        return Err(common::friendly_error(&String::from_utf8_lossy(&output.stderr)));
     }
 
     if replace {
@@ -368,7 +368,7 @@ pub fn trim_video(
         .map_err(|e| format!("Could not start FFmpeg: {e}"))?;
     if !output.status.success() {
         let _ = std::fs::remove_file(&tmp);
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        return Err(common::friendly_error(&String::from_utf8_lossy(&output.stderr)));
     }
 
     if replace {

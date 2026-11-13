@@ -3,19 +3,53 @@ use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use crate::{audio, settings};
 use tauri::{AppHandle, Manager};
 
 // Stops Windows from flashing a black console window when FFmpeg starts.
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+/// Which FFmpeg to run: the one shipped inside Orbit (installed version), otherwise
+/// the one on PATH (e.g. while developing without the bundled copy).
+static FFMPEG: OnceLock<PathBuf> = OnceLock::new();
+
+/// Called once at startup.
+pub fn init_ffmpeg(app: &AppHandle) {
+    let bundled = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|dir| dir.join("ffmpeg").join("ffmpeg.exe"))
+        .filter(|path| path.exists());
+    let _ = FFMPEG.set(bundled.unwrap_or_else(|| PathBuf::from("ffmpeg")));
+}
+
 /// An FFmpeg command with no console window that only prints real errors.
 pub fn ffmpeg() -> Command {
-    let mut cmd = Command::new("ffmpeg");
+    let path = FFMPEG.get().cloned().unwrap_or_else(|| PathBuf::from("ffmpeg"));
+    let mut cmd = Command::new(path);
     cmd.args(["-hide_banner", "-loglevel", "error"])
         .creation_flags(CREATE_NO_WINDOW);
     cmd
+}
+
+/// Turns FFmpeg's technical errors into something a user understands where we can.
+pub fn friendly_error(stderr: &str) -> String {
+    let lower = stderr.to_lowercase();
+    if lower.contains("nvenc") || lower.contains("nvcuda") || lower.contains("nvencodeapi") {
+        return "Orbit needs an NVIDIA graphics card to record (it uses NVIDIA's video \
+                encoder, NVENC). AMD and Intel support is planned."
+            .into();
+    }
+    if lower.contains("ddagrab") || lower.contains("duplicat") {
+        return format!(
+            "Windows didn't allow screen capture right now (e.g. a protected screen or \
+             a fullscreen switch). Try again. Details: {}",
+            stderr.trim()
+        );
+    }
+    stderr.trim().to_string()
 }
 
 /// Videos\Orbit\<sub>, created if it doesn't exist yet.
@@ -204,7 +238,7 @@ impl Background {
             }
             on_exit(match result {
                 Ok(out) if out.status.success() => Ok(()),
-                Ok(out) => Err(String::from_utf8_lossy(&out.stderr).trim().to_string()),
+                Ok(out) => Err(friendly_error(&String::from_utf8_lossy(&out.stderr))),
                 Err(e) => Err(e.to_string()),
             });
         });
