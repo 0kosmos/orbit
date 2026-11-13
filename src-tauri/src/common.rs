@@ -99,14 +99,17 @@ pub fn timestamp_name(ext: &str) -> String {
 }
 
 /// Starts the sound sources that are turned on in Settings: PC sound first, then the mic.
-pub fn start_audio(app: &AppHandle) -> Result<Vec<audio::Pipe>, String> {
+/// Also returns the `AvSync` that measures the sound/video start difference (pass it
+/// to `Background::start`; use its offset with `add_aligned_inputs` when saving).
+pub fn start_audio(app: &AppHandle) -> Result<(Vec<audio::Pipe>, Arc<audio::AvSync>), String> {
     let s = settings::get(app);
+    let gate = Arc::new(audio::AvSync::default());
     let mut pipes = Vec::new();
     if s.system_audio {
-        pipes.push(audio::start(audio::Source::System(s.system_device))?);
+        pipes.push(audio::start(audio::Source::System(s.system_device), gate.clone())?);
     }
     if s.mic_enabled {
-        match audio::start(audio::Source::Mic(s.mic_device)) {
+        match audio::start(audio::Source::Mic(s.mic_device), gate.clone()) {
             Ok(pipe) => pipes.push(pipe),
             Err(e) => {
                 audio::release(&pipes);
@@ -114,7 +117,7 @@ pub fn start_audio(app: &AppHandle) -> Result<Vec<audio::Pipe>, String> {
             }
         }
     }
-    Ok(pipes)
+    Ok((pipes, gate))
 }
 
 /// Inputs, filters, encoders and track layout shared by recording and the replay buffer.
@@ -168,6 +171,11 @@ pub fn add_capture_args(
         }
     }
 
+    // With sound: FFmpeg reports its video frame count 4x a second (one short text
+    // line), so Orbit knows when the video really started (audio::AvSync).
+    if !pipes.is_empty() {
+        cmd.args(["-progress", "pipe:1", "-stats_period", "0.25"]);
+    }
     cmd.arg("-filter_complex")
         .arg(graph)
         .args(["-map", "[v]", "-c:v", "h264_nvenc", "-preset", s.nvenc_preset()])
@@ -211,17 +219,52 @@ impl Background {
 
     /// Start FFmpeg. `on_exit` runs once it has quit: Ok if it finished cleanly,
     /// Err with FFmpeg's error message otherwise.
-    pub fn start<F>(&self, mut cmd: Command, on_exit: F) -> Result<(), String>
+    /// `sync`: the recording's `AvSync` and the video fps, when the command records
+    /// sound (it then prints "-progress" lines, see `add_capture_args`).
+    pub fn start<F>(
+        &self,
+        mut cmd: Command,
+        sync: Option<(Arc<audio::AvSync>, u32)>,
+        on_exit: F,
+    ) -> Result<(), String>
     where
         F: FnOnce(Result<(), String>) + Send + 'static,
     {
         let mut child = cmd
             .stdin(Stdio::piped())
-            .stdout(Stdio::null())
+            .stdout(if sync.is_some() { Stdio::piped() } else { Stdio::null() })
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| format!("Could not start FFmpeg: {e}"))?;
         let stdin = child.stdin.take().ok_or("Could not talk to FFmpeg")?;
+
+        // Read FFmpeg's progress lines. The first "frame=N" with N > 0 tells when the
+        // video really started: now minus N frames. The rest is just read (and ignored)
+        // so FFmpeg never waits on a full pipe.
+        if let (Some((gate, fps)), Some(stdout)) = (sync, child.stdout.take()) {
+            std::thread::spawn(move || {
+                use std::io::BufRead;
+                for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
+                    if let Some(n) = line.strip_prefix("frame=") {
+                        let frames: u64 = n.trim().parse().unwrap_or(0);
+                        if frames > 0 {
+                            // FFmpeg counts a frame ~0.13 s after capturing it (encoding +
+                            // reporting), so the video really started that much earlier.
+                            // Checked with the flash + beep test in audio.rs (sync_test), game
+                            // sound + mic, recording and replay path: +0.024 s after saving
+                            // (sound was 0.55–0.7 s late idle, ~1 s in-game, before the fix).
+                            const COUNT_DELAY: f64 = 0.13;
+                            let secs = frames as f64 / fps.max(1) as f64 + COUNT_DELAY;
+                            if let Some(at) = std::time::Instant::now()
+                                .checked_sub(std::time::Duration::from_secs_f64(secs))
+                            {
+                                gate.set_video_start(at);
+                            }
+                        }
+                    }
+                }
+            });
+        }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         *self.current.lock().unwrap() = Some((id, stdin));
 
@@ -267,5 +310,19 @@ pub fn add_track_names(cmd: &mut Command, tracks: &[&str]) {
             .arg(format!("title={title}"))
             .arg(format!("-metadata:s:a:{i}"))
             .arg(format!("handler_name={title}"));
+    }
+}
+
+/// Adds the input(s) for saving a recording / clip with the sound lined up with the
+/// video: the same file is read twice, the video from the start and the sound with
+/// `offset` seconds cut off its start (see `audio::AvSync`). Lossless (`-c copy`).
+/// `input` = the input options, e.g. `["-i", "x.mkv"]`.
+pub fn add_aligned_inputs(cmd: &mut Command, input: &[&std::ffi::OsStr], offset: f64) {
+    cmd.args(input);
+    if offset >= 0.01 {
+        cmd.arg("-ss").arg(format!("{offset:.3}")).args(input);
+        cmd.args(["-map", "0:v", "-map", "1:a"]);
+    } else {
+        cmd.args(["-map", "0"]);
     }
 }

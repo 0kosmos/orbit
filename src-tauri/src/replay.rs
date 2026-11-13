@@ -23,6 +23,8 @@ pub struct Replay {
     restart: AtomicBool,
     /// Names of the audio tracks in the buffer ("Game + Mic", "Game", "Mic").
     tracks: Mutex<Vec<&'static str>>,
+    /// Sound/video start difference of the running buffer (cut from the sound on save).
+    av: Mutex<Option<std::sync::Arc<audio::AvSync>>>,
 }
 
 pub fn is_running(app: &AppHandle) -> bool {
@@ -76,7 +78,10 @@ fn try_start(app: &AppHandle) -> Result<(), String> {
     // Keep a few more pieces than needed, so the ones we join are never being overwritten.
     let pieces = settings::get(app).replay_seconds / SEGMENT_SECONDS + 3;
 
-    let pipes = common::start_audio(app)?;
+    let (pipes, av) = common::start_audio(app)?;
+    // With sound: measure when the video really starts, to line the sound up on save.
+    let sync = (!pipes.is_empty()).then(|| (av.clone(), crate::settings::get(app).fps()));
+    *state.av.lock().unwrap() = Some(av);
 
     let mut cmd = common::ffmpeg();
     cmd.arg("-y");
@@ -96,7 +101,7 @@ fn try_start(app: &AppHandle) -> Result<(), String> {
 
     let done_app = app.clone();
     let done_pipes = pipes.clone();
-    let started = state.ffmpeg.start(cmd, move |result| {
+    let started = state.ffmpeg.start(cmd, sync, move |result| {
         audio::release(&done_pipes);
         let state = done_app.state::<Replay>();
         if state.restart.swap(false, Ordering::Relaxed) {
@@ -182,11 +187,22 @@ fn try_save(app: &AppHandle) -> Result<String, String> {
 
     // Join without re-encoding (-c copy): fast and no quality loss.
     let out = common::orbit_dir(app, "Clips")?.join(common::media_name("mp4"));
-    // "-map 0" keeps every track (video, game sound, mic), not just the first audio one.
+    // Every track (video, game sound, mic), with the sound lined up with the video.
+    let offset = app
+        .state::<Replay>()
+        .av
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map_or(0.0, |av| av.offset());
     let mut cmd = common::ffmpeg();
-    cmd.args(["-y", "-f", "concat", "-safe", "0", "-i"])
-        .arg(&list_path)
-        .args(["-map", "0", "-c", "copy", "-movflags", "+faststart"]);
+    cmd.arg("-y");
+    common::add_aligned_inputs(
+        &mut cmd,
+        &["-f".as_ref(), "concat".as_ref(), "-safe".as_ref(), "0".as_ref(), "-i".as_ref(), list_path.as_os_str()],
+        offset,
+    );
+    cmd.args(["-c", "copy", "-movflags", "+faststart"]);
     // The .ts pieces can't store track names, so add them again.
     common::add_track_names(&mut cmd, &app.state::<Replay>().tracks.lock().unwrap());
     let output = cmd

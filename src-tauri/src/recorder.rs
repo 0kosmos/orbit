@@ -36,7 +36,9 @@ pub fn stop(app: &AppHandle) {
 fn start(app: &AppHandle) -> Result<(), String> {
     let path = common::orbit_dir(app, "Recordings")?.join(common::media_name("mkv"));
 
-    let pipes = common::start_audio(app)?;
+    let (pipes, av) = common::start_audio(app)?;
+    // With sound: measure when the video really starts, to line the sound up on save.
+    let sync = (!pipes.is_empty()).then(|| (av.clone(), crate::settings::get(app).fps()));
 
     let mut cmd = common::ffmpeg();
     cmd.arg("-y");
@@ -45,11 +47,11 @@ fn start(app: &AppHandle) -> Result<(), String> {
 
     let done_app = app.clone();
     let done_pipes = pipes.clone();
-    let started = app.state::<Recorder>().0.start(cmd, move |result| {
+    let started = app.state::<Recorder>().0.start(cmd, sync, move |result| {
         audio::release(&done_pipes);
         let _ = match result {
             Ok(()) => {
-                let saved = to_mp4(&path, &tracks);
+                let saved = to_mp4(&path, &tracks, av.offset());
                 sound::play(&done_app, Sound::Saved);
                 done_app.emit("recording-saved", saved.to_string_lossy().into_owned())
             }
@@ -72,10 +74,13 @@ fn start(app: &AppHandle) -> Result<(), String> {
 /// Recordings are written as MKV (still playable if the PC crashes mid-recording).
 /// Afterwards they're copied into an MP4 (no re-encoding, about 1 s per GB), which
 /// plays everywhere, including Orbit's own viewer. If that fails, the MKV is kept.
-fn to_mp4(mkv: &Path, tracks: &[&str]) -> PathBuf {
+/// `offset`: seconds of sound to cut from the start so it lines up with the video.
+fn to_mp4(mkv: &Path, tracks: &[&str], offset: f64) -> PathBuf {
     let mp4 = mkv.with_extension("mp4");
     let mut cmd = common::ffmpeg();
-    cmd.args(["-y", "-i"]).arg(mkv).args(["-map", "0", "-c", "copy"]);
+    cmd.arg("-y");
+    common::add_aligned_inputs(&mut cmd, &["-i".as_ref(), mkv.as_os_str()], offset);
+    cmd.args(["-c", "copy"]);
     common::add_track_names(&mut cmd, tracks);
     let ok = cmd
         .arg(&mp4)

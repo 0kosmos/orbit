@@ -78,9 +78,47 @@ pub struct Pipe {
 
 static NEXT_PIPE: AtomicU64 = AtomicU64::new(0);
 
+/// Measures how much later the video started than the sound, so it can be corrected
+/// when the file is saved (see `common::align_audio_args`).
+///
+/// FFmpeg opens the sound pipes well before its first video frame (setting up screen
+/// capture and the NVIDIA encoder takes ~0.5 s idle, ~1 s in a heavy game). Sound and
+/// video both count from 0, so without correction the sound is that much too late.
+/// The sound is NOT held back (that would stall FFmpeg: with game sound + mic the
+/// screen capture shares a filter graph with the audio mixing); instead the start of
+/// the sound is cut off when saving.
+#[derive(Default)]
+pub struct AvSync {
+    audio_start: Mutex<Option<Instant>>,
+    video_start: Mutex<Option<Instant>>,
+}
+
+impl AvSync {
+    /// Sound time 0 (the first sound source to start wins).
+    fn set_audio_start(&self, at: Instant) {
+        self.audio_start.lock().unwrap().get_or_insert(at);
+    }
+
+    /// Video time 0 (worked out from FFmpeg's progress report).
+    pub fn set_video_start(&self, at: Instant) {
+        self.video_start.lock().unwrap().get_or_insert(at);
+    }
+
+    /// Seconds of sound to cut from the start so it lines up with the video
+    /// (0 if unknown, e.g. a very short recording).
+    pub fn offset(&self) -> f64 {
+        let audio = *self.audio_start.lock().unwrap();
+        let video = *self.video_start.lock().unwrap();
+        match (audio, video) {
+            (Some(a), Some(v)) if v > a => (v - a).as_secs_f64(),
+            _ => 0.0,
+        }
+    }
+}
+
 /// Creates a pipe and starts a thread that streams the sound into it once FFmpeg
-/// connects. The thread ends by itself when FFmpeg stops.
-pub fn start(source: Source) -> Result<Pipe, String> {
+/// connects (its start time goes to `sync`). The thread ends by itself when FFmpeg stops.
+pub fn start(source: Source, sync: Arc<AvSync>) -> Result<Pipe, String> {
     let name = format!(
         r"\\.\pipe\orbit_audio_{}_{}",
         std::process::id(),
@@ -120,7 +158,7 @@ pub fn start(source: Source) -> Result<Pipe, String> {
         // SAFETY: we own the handle; File closes it when dropped.
         let mut pipe = unsafe { File::from_raw_handle(handle as _) };
         // This ends with an error when FFmpeg stops and closes the pipe; that's normal.
-        let _ = capture(&source, &mut |bytes| pipe.write_all(bytes));
+        let _ = capture(&source, Some(&sync), &mut |bytes| pipe.write_all(bytes));
     });
     Ok(Pipe { name, channels })
 }
@@ -137,6 +175,7 @@ pub fn release(pipes: &[Pipe]) {
 /// returns an error. Runs on its own thread.
 fn capture(
     source: &Source,
+    sync: Option<&AvSync>,
     sink: &mut dyn FnMut(&[u8]) -> io::Result<()>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let _ = wasapi::initialize_mta();
@@ -164,9 +203,22 @@ fn capture(
     let mut data: VecDeque<u8> = VecDeque::new();
     let mut frames_written: u64 = 0;
     let silence = vec![0u8; bytes_per_frame * SAMPLE_RATE / 10];
+    // Write `frames` of silence.
+    let write_silence = |sink: &mut dyn FnMut(&[u8]) -> io::Result<()>, mut frames: usize| {
+        while frames > 0 {
+            let n = frames.min(silence.len() / bytes_per_frame);
+            sink(&silence[..n * bytes_per_frame])?;
+            frames -= n;
+        }
+        io::Result::Ok(())
+    };
 
     client.start_stream()?;
+    // Sound time 0 = this moment.
     let started = Instant::now();
+    if let Some(sync) = sync {
+        sync.set_audio_start(started);
+    }
 
     loop {
         // Windows wakes us when sound is available. For PC sound it sends nothing at
@@ -188,13 +240,9 @@ fn capture(
             // in sync with the video instead of the quiet parts being skipped.
             let now = (started.elapsed().as_secs_f64() * SAMPLE_RATE as f64) as u64;
             let target = now.saturating_sub(LATENCY_FRAMES);
-            let mut missing = target.saturating_sub(frames_written) as usize;
-            while missing > 0 {
-                let frames = missing.min(silence.len() / bytes_per_frame);
-                sink(&silence[..frames * bytes_per_frame])?;
-                frames_written += frames as u64;
-                missing -= frames;
-            }
+            let missing = target.saturating_sub(frames_written) as usize;
+            write_silence(sink, missing)?;
+            frames_written += missing as u64;
         }
     }
 }
@@ -263,7 +311,7 @@ pub fn start_test(app: &AppHandle, source: Source) {
         let mut last = Instant::now();
         let mut peak = 0f32;
         let mut timed_out = false;
-        let result = capture(&source, &mut |bytes| {
+        let result = capture(&source, None, &mut |bytes| {
             if stop.load(Ordering::Relaxed) {
                 return Err(io::Error::other("stopped"));
             }
@@ -302,5 +350,68 @@ pub fn start_test(app: &AppHandle, source: Source) {
 pub fn stop_test(app: &AppHandle) {
     if let Some(stop) = app.state::<LevelTest>().0.lock().unwrap().take() {
         stop.store(true, Ordering::Relaxed);
+    }
+}
+
+#[cfg(test)]
+mod sync_test {
+    // A/V sync measurement: flashes the screen (inverts colours) and beeps at the same
+    // moment while recording through Orbit's normal pipeline (gate + Background).
+    // Off by default because it flashes the screen. Run it on purpose with:
+    //   ORBIT_TEST_OUT=C:/path/out.mp4 cargo test --lib av_sync -- --ignored --nocapture
+    // then compare the flash (video brightness jump) and the beep (audio) times.
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn GetDC(h: isize) -> isize;
+        fn ReleaseDC(h: isize, dc: isize) -> i32;
+        fn GetSystemMetrics(i: i32) -> i32;
+        fn InvalidateRect(h: isize, r: *const u8, erase: i32) -> i32;
+    }
+    #[link(name = "gdi32")]
+    unsafe extern "system" {
+        fn PatBlt(dc: isize, x: i32, y: i32, w: i32, h: i32, rop: u32) -> i32;
+    }
+
+    #[test]
+    #[ignore]
+    fn av_sync() {
+        use windows_sys::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_MEMORY};
+        static BEEP: &[u8] = include_bytes!("../sounds/saved.wav");
+        let out = std::env::var("ORBIT_TEST_OUT").unwrap();
+        let wait: u64 = std::env::var("ORBIT_TEST_WAIT").ok().and_then(|v| v.parse().ok()).unwrap_or(4000);
+        // Exactly like a real recording with game sound + mic: AvSync + Background.
+        let av = std::sync::Arc::new(super::AvSync::default());
+        let pipes = vec![
+            super::start(super::Source::System(None), av.clone()).unwrap(),
+            super::start(super::Source::Mic(None), av.clone()).unwrap(),
+        ];
+        let mut cmd = crate::common::ffmpeg();
+        cmd.arg("-y");
+        crate::common::add_capture_args(&mut cmd, &pipes, &crate::settings::Settings::default());
+        let raw = format!("{out}.raw.mkv");
+        cmd.args(["-t", "8"]).arg(&raw);
+        let bg = crate::common::Background::default();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let spawned = std::time::Instant::now();
+        bg.start(cmd, Some((av.clone(), 60)), move |r| { let _ = tx.send(r); }).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(wait));
+        unsafe {
+            let dc = GetDC(0);
+            PlaySoundW(BEEP.as_ptr() as *const u16, std::ptr::null_mut(), SND_MEMORY | SND_ASYNC);
+            PatBlt(dc, 0, 0, GetSystemMetrics(0), GetSystemMetrics(1), 0x0055_0009); // DSTINVERT
+            ReleaseDC(0, dc);
+        }
+        println!("FLASH+BEEP at {:.3}s after spawn", spawned.elapsed().as_secs_f64());
+        std::thread::sleep(std::time::Duration::from_millis(350));
+        unsafe { InvalidateRect(0, std::ptr::null(), 1) };
+        let r = rx.recv().unwrap();
+        assert!(r.is_ok(), "{r:?}");
+        // Save like Orbit does: sound lined up with the video.
+        println!("OFFSET {:.3}s", av.offset());
+        let mut save = crate::common::ffmpeg();
+        save.arg("-y");
+        crate::common::add_aligned_inputs(&mut save, &["-i".as_ref(), raw.as_ref()], av.offset());
+        let o = save.args(["-c", "copy"]).arg(&out).output().unwrap();
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     }
 }
